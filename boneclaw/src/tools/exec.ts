@@ -1,11 +1,33 @@
 import type { Tool, ToolResult, ToolContext } from './types';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import { emit } from '../events/emitter';
 
 /**
+ * Send a command to the shared tmux session so it appears in the frontend
+ * terminal. The user sees the command prompt and output in real-time.
+ *
+ * Output capture is handled separately by child_process (below) — the
+ * command executes twice, but this keeps the terminal display clean and
+ * natural while giving the agent structured output.
+ */
+function showInTmux(command: string, cwd: string): void {
+  try {
+    // cd to the working directory first, then run the command, so the
+    // terminal shows the same context as the child_process execution.
+    const full = cwd ? `cd ${cwd} && ${command}` : command;
+    const escaped = full.replace(/'/g, "'\\''");
+    execSync(
+      `tmux send-keys -t main '${escaped}' Enter`,
+      { stdio: 'ignore', timeout: 2000 }
+    );
+  } catch {
+    // tmux may not be available — ignore
+  }
+}
+
+/**
  * Execute a shell command via child_process and capture output.
- * The frontend shows agent commands via activity log messages in the chat,
- * so we don't need to duplicate execution in tmux.
+ * Also displays the command in tmux for frontend terminal visibility.
  */
 async function execCommand(
   command: string,
@@ -13,8 +35,10 @@ async function execCommand(
   env?: Record<string, string>,
   timeout?: number
 ): Promise<{ stdout: string; stderr: string; code: number }> {
+  // Show in tmux so the user sees it in the frontend terminal
+  showInTmux(command, cwd);
 
-  // Run via child_process to capture output for the agent
+  // Run via child_process to capture structured output for the agent
   return new Promise((resolve) => {
     const proc = spawn('bash', ['-c', command], {
       cwd,
