@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Xvfb for non-headless mode (maximum stealth)
     xvfb \
     # General tools
+    sudo \
     curl \
     wget \
     git \
@@ -63,7 +64,9 @@ ENV TZ=America/New_York
 RUN useradd -m -s /bin/bash -u 1001 sandbox && \
     mkdir -p /home/sandbox/workspace && \
     mkdir -p /home/sandbox/.boneclaw && \
-    chown -R sandbox:sandbox /home/sandbox
+    chown -R sandbox:sandbox /home/sandbox && \
+    echo 'sandbox ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/sandbox && \
+    chmod 0440 /etc/sudoers.d/sandbox
 
 # Install global npm packages
 RUN npm install -g typescript ts-node nodemon

@@ -4,7 +4,6 @@ import { LoginScreen, RegisterScreen } from '@/components/auth';
 import { ReturningUserScreen } from '@/components/screens/ReturningUserScreen';
 import { RebootingScreen } from '@/components/screens/RebootingScreen';
 import { WelcomeScreen } from '@/components/screens/WelcomeScreen';
-import { BootScreen } from '@/components/BootScreen';
 import { useAuthStore } from '@/stores/authStore';
 import { useComputerStore } from '@/stores/agentStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
@@ -18,9 +17,9 @@ type RebootStatus = 'stopping' | 'updating' | 'starting' | 'done' | 'error';
  * App orchestrates the full boot flow:
  *
  *   1. Black screen while checking auth
- *   2. If not logged in: WelcomeScreen ("Hello" → "Welcome to..." → fade out) → Lock screen
- *   3. On login success: lock screen slides up to reveal Desktop
- *   4. If returning with valid session: skip welcome, brief lock screen, auto-slide
+ *   2. If not logged in: WelcomeScreen → Lock screen (login/register)
+ *   3. On login success: lock screen shows provisioning progress → container ready → slide up
+ *   4. If returning with valid session: lock screen shows provisioning → ready → slide up
  *   5. Lock Screen: slides lock screen back down without logging out
  *   6. Restart: shows rebooting screen, calls backend reboot, re-provisions
  */
@@ -51,18 +50,11 @@ function App() {
     checkAuth().then(() => setAuthChecked(true));
   }, [checkAuth]);
 
-  // After auth check: show welcome if not logged in, auto-slide if logged in
+  // After auth check: show welcome if not logged in
   useEffect(() => {
     if (!authChecked) return;
-
     if (!isAuthenticated) {
       setShowWelcome(true);
-    } else {
-      // Returning user with valid session — auto-slide up
-      setTimeout(() => {
-        setSlidingUp(true);
-        setTimeout(() => setLockScreenGone(true), 700);
-      }, 600);
     }
   }, [authChecked, isAuthenticated]);
 
@@ -73,17 +65,15 @@ function App() {
     }
   }, [isAuthenticated, computer, computerLoading, rebooting, fetchComputer]);
 
-  // Watch for auth state change (login success) — trigger slide-up
-  const [prevAuth, setPrevAuth] = useState(false);
+  // Slide up lock screen only when container is ready (not just on auth change)
   useEffect(() => {
-    if (isAuthenticated && !prevAuth && authChecked) {
+    if (isAuthenticated && computer && authChecked && !lockScreenGone && !slidingUp) {
       setTimeout(() => {
         setSlidingUp(true);
         setTimeout(() => setLockScreenGone(true), 700);
       }, 300);
     }
-    setPrevAuth(isAuthenticated);
-  }, [isAuthenticated, prevAuth, authChecked]);
+  }, [isAuthenticated, computer, authChecked, lockScreenGone, slidingUp]);
 
   const handleWelcomeComplete = useCallback(() => {
     setShowWelcome(false);
@@ -103,13 +93,11 @@ function App() {
 
   // ── Lock Screen: slide in from top ──
   const handleLockScreen = useCallback(() => {
-    // Mount the lock screen off-screen above, then animate it down
     setSlidingUp(false);
-    setSlidingDown(false); // start at translateY(-100%)
+    setSlidingDown(false);
     setLockScreenGone(false);
     setIsLocked(true);
 
-    // Trigger slide-down on next frame so the transition fires
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         setSlidingDown(true);
@@ -136,10 +124,8 @@ function App() {
     setRebootStatus('stopping');
     setRebootError(null);
 
-    // Disconnect all WebSockets first
     unsubscribeFromComputer();
 
-    // Simulate progress stages while the backend does the work
     const stageTimer = setTimeout(() => setRebootStatus('updating'), 2000);
     const stageTimer2 = setTimeout(() => setRebootStatus('starting'), 5000);
 
@@ -152,7 +138,6 @@ function App() {
       if (!result.success) {
         setRebootStatus('error');
         setRebootError(result.error || 'Restart failed');
-        // Auto-dismiss error after 3s and try to recover
         setTimeout(() => {
           setRebooting(false);
           fetchComputer();
@@ -162,10 +147,8 @@ function App() {
 
       setRebootStatus('done');
 
-      // Brief pause on "done" then dismiss and re-fetch
       setTimeout(() => {
         setRebooting(false);
-        // Clear old computer state so fetchComputer shows BootScreen then Desktop
         useComputerStore.setState({ computer: null, instanceId: null, isLoading: false, error: null });
         fetchComputer();
       }, 800);
@@ -188,35 +171,30 @@ function App() {
 
   return (
     <>
-      {/* Layer 1: Desktop (bottom) — only render when authenticated */}
-      {isAuthenticated && (
+      {/* Layer 1: Desktop (bottom) — only when authenticated AND container ready */}
+      {isAuthenticated && computer && (
         <div className="fixed inset-0">
-          {!computer || computerLoading ? (
-            <BootScreen error={computerError} onRetry={fetchComputer} />
-          ) : (
-            <Desktop
-              onLogout={handleLogout}
-              onLockScreen={handleLockScreen}
-              onRestart={handleRestart}
-              isConnected={isConnected}
-            />
-          )}
+          <Desktop
+            onLogout={handleLogout}
+            onLockScreen={handleLockScreen}
+            onRestart={handleRestart}
+            isConnected={isConnected}
+          />
         </div>
       )}
 
-      {/* Layer 2: Lock screen — slides up to unlock, slides down from top to lock */}
+      {/* Layer 2: Lock screen — slides up when container is ready */}
       {!lockScreenGone && (
         <div
           className="fixed inset-0"
-          // Prevent browser password autofill from focusing inputs while welcome screen is visible
           {...((showWelcome && !isAuthenticated) ? { inert: true } as any : {})}
           style={{
             zIndex: 9999,
             transform: slidingUp
-              ? 'translateY(-100%)'           // unlocking: slide off above
+              ? 'translateY(-100%)'
               : isLocked && !slidingDown
-                ? 'translateY(-100%)'         // locking: start above viewport
-                : 'translateY(0)',            // resting / sliding down into view
+                ? 'translateY(-100%)'
+                : 'translateY(0)',
             transition: slidingUp
               ? 'transform 0.7s cubic-bezier(0.4, 0.0, 0.2, 1)'
               : slidingDown
@@ -225,7 +203,12 @@ function App() {
           }}
         >
           {isAuthenticated ? (
-            <ReturningUserScreen onUnlock={isLocked ? handleUnlock : undefined} />
+            <ReturningUserScreen
+              onUnlock={isLocked ? handleUnlock : undefined}
+              isProvisioning={computerLoading || (!computer && !computerError)}
+              provisionError={computerError}
+              onRetry={fetchComputer}
+            />
           ) : authView === 'login' ? (
             <LoginScreen onSwitchToRegister={() => setAuthView('register')} />
           ) : (
@@ -234,12 +217,12 @@ function App() {
         </div>
       )}
 
-      {/* Layer 3: Welcome screen (topmost) — always shown when not logged in */}
+      {/* Layer 3: Welcome screen (topmost) */}
       {showWelcome && !isAuthenticated && (
         <WelcomeScreen onComplete={handleWelcomeComplete} />
       )}
 
-      {/* Layer 4: Rebooting overlay (above everything) */}
+      {/* Layer 4: Rebooting overlay */}
       {rebooting && (
         <RebootingScreen status={rebootStatus} error={rebootError} />
       )}

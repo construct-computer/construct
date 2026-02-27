@@ -12,7 +12,7 @@
   /* Font families */
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --font-sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
-  --font-brand: "Geo", "Playfair Display", sans-serif;
+  --font-brand: "Space Grotesk", system-ui, sans-serif;
 
   /* Default (light) — frosted white glass */
   --color-bg: #e0dcd8;
@@ -263,6 +263,19 @@ html.dark ::-webkit-scrollbar-thumb:active {
   0%   { background-position: 0% 50%; }
   50%  { background-position: 100% 50%; }
   100% { background-position: 0% 50%; }
+}
+
+/* Handwriting reveal — animated mask sweeps left to right with soft pen-tip edge.
+   Uses @property so the browser can interpolate the custom property in a gradient. */
+@property --hello-reveal {
+  syntax: '<percentage>';
+  initial-value: -10%;
+  inherits: false;
+}
+
+@keyframes hello-write {
+  from { --hello-reveal: -10%; }
+  to   { --hello-reveal: 110%; }
 }
 
 /* Soft breathing glow behind content */

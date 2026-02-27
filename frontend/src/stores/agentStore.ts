@@ -127,8 +127,12 @@ export interface SystemStats {
   cpuCount: number;
   memUsedBytes: number;
   memTotalBytes: number;
-  diskUsedBytes: number;
-  diskTotalBytes: number;
+  pids: number;
+  netInSpeed: number;   // bytes/sec (download)
+  netOutSpeed: number;  // bytes/sec (upload)
+  netInBytes: number;   // cumulative (for delta tracking)
+  netOutBytes: number;  // cumulative (for delta tracking)
+  uptime: number;       // seconds
 }
 
 interface BrowserState {
@@ -392,14 +396,29 @@ export const useComputerStore = create<ComputerStore>()(
       browserWS.onMessage((msg) => {
         const { browserState } = get();
         if (msg.type === 'stats') {
+          const netInBytes = (msg.netInBytes as number) || 0;
+          const netOutBytes = (msg.netOutBytes as number) || 0;
+          const prev = get().systemStats;
+          // Compute speed from delta between polls (5s interval)
+          const dt = 5;
+          let netInSpeed = 0;
+          let netOutSpeed = 0;
+          if (prev && prev.netInBytes > 0) {
+            netInSpeed = Math.max(0, (netInBytes - prev.netInBytes) / dt);
+            netOutSpeed = Math.max(0, (netOutBytes - prev.netOutBytes) / dt);
+          }
           set({
             systemStats: {
               cpuPercent: (msg.cpuPercent as number) || 0,
               cpuCount: (msg.cpuCount as number) || 1,
               memUsedBytes: (msg.memUsedBytes as number) || 0,
               memTotalBytes: (msg.memTotalBytes as number) || 0,
-              diskUsedBytes: (msg.diskUsedBytes as number) || 0,
-              diskTotalBytes: (msg.diskTotalBytes as number) || 0,
+              pids: (msg.pids as number) || 0,
+              netInSpeed,
+              netOutSpeed,
+              netInBytes,
+              netOutBytes,
+              uptime: (msg.uptime as number) || 0,
             },
           });
         } else if (msg.type === 'status') {

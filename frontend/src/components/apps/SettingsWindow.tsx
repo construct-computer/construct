@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Moon, Sun, Volume2, VolumeX, Key, Cpu, Loader2, Check } from 'lucide-react';
+import { Moon, Sun, Volume2, VolumeX, Key, Cpu, Loader2, Check, Image } from 'lucide-react';
 import { Button, Label, Checkbox, Separator, Input } from '@/components/ui';
-import { useSettingsStore } from '@/stores/settingsStore';
+import { useSettingsStore, WALLPAPERS, getWallpaperSrc } from '@/stores/settingsStore';
 import { useComputerStore } from '@/stores/agentStore';
 import type { WindowConfig } from '@/types';
 
@@ -21,7 +21,7 @@ interface SettingsWindowProps {
 }
 
 export function SettingsWindow({ config: _config }: SettingsWindowProps) {
-  const { theme, soundEnabled, toggleTheme, toggleSound } =
+  const { theme, soundEnabled, wallpaperId, toggleTheme, toggleSound, setWallpaper } =
     useSettingsStore();
   
   const { computer, updateComputer, fetchComputer } = useComputerStore();
@@ -145,7 +145,7 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
         <Separator />
       
           {/* Appearance */}
-        <div>
+        <div className="space-y-3">
           <h3 className="text-sm font-medium text-[var(--color-text-muted)] mb-2">
             Appearance
           </h3>
@@ -161,6 +161,50 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
             <Button variant="default" size="sm" onClick={toggleTheme}>
               {theme === 'dark' ? 'Dark' : 'Light'}
             </Button>
+          </div>
+
+          {/* Wallpaper picker */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Image className="w-4 h-4" />
+              <Label>Wallpaper</Label>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {WALLPAPERS.map((wp) => (
+                <button
+                  key={wp.id}
+                  onClick={() => setWallpaper(wp.id)}
+                  className="relative rounded-lg overflow-hidden border-2 transition-all duration-150 focus:outline-none"
+                  style={{
+                    borderColor: wallpaperId === wp.id ? 'var(--color-accent)' : 'var(--color-border)',
+                    boxShadow: wallpaperId === wp.id ? '0 0 0 1px var(--color-accent)' : 'none',
+                  }}
+                >
+                  <div
+                    className="w-full aspect-video"
+                    style={{
+                      backgroundImage: `url(${getWallpaperSrc(wp.id)})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                    }}
+                  />
+                  <div
+                    className="absolute inset-x-0 bottom-0 px-2 py-1 text-[10px] font-medium truncate"
+                    style={{
+                      background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
+                      color: 'rgba(255,255,255,0.85)',
+                    }}
+                  >
+                    {wp.name}
+                  </div>
+                  {wallpaperId === wp.id && (
+                    <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-[var(--color-accent)] flex items-center justify-center">
+                      <Check className="w-2.5 h-2.5 text-white" />
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         

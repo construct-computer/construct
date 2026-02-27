@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { Sun, Moon } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
-import { useSettingsStore } from '@/stores/settingsStore';
+import { useSettingsStore, getWallpaperSrc } from '@/stores/settingsStore';
 import { useSound } from '@/hooks/useSound';
-import wallpaperImg from '@/assets/wallpaper.jpg';
 import constructLogo from '@/assets/construct-logo.png';
 
 interface LoginScreenProps {
@@ -14,7 +13,8 @@ export function LoginScreen({ onSwitchToRegister }: LoginScreenProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const { login, isLoading, error, clearError } = useAuthStore();
-  const { theme, toggleTheme } = useSettingsStore();
+  const { theme, wallpaperId, toggleTheme } = useSettingsStore();
+  const wallpaperSrc = getWallpaperSrc(wallpaperId);
   const { play } = useSound();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -41,7 +41,7 @@ export function LoginScreen({ onSwitchToRegister }: LoginScreenProps) {
       <div
         className="absolute inset-0"
         style={{
-          backgroundImage: `url(${wallpaperImg})`,
+          backgroundImage: `url(${wallpaperSrc})`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
         }}
@@ -79,8 +79,8 @@ export function LoginScreen({ onSwitchToRegister }: LoginScreenProps) {
         {/* Name */}
         <h1 className="text-xl text-black/90 dark:text-white mb-1
                        drop-shadow-[0_1px_2px_rgba(0,0,0,0.3)]"
-            style={{ fontFamily: "'Geo', sans-serif", fontWeight: 400, letterSpacing: '0.04em' }}>
-          construct<span className="opacity-40">.</span><em className="italic opacity-60">computer</em>
+            style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 500, letterSpacing: '-0.02em' }}>
+          construct<span className="opacity-30 font-light">.</span><span className="font-light opacity-55">computer</span>
         </h1>
         <p className="text-sm text-black/50 dark:text-white/50 mb-6
                       drop-shadow-[0_1px_1px_rgba(0,0,0,0.2)]">

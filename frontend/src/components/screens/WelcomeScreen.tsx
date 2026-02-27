@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import wallpaperImg from '@/assets/wallpaper.jpg';
+import { useSettingsStore, getWallpaperSrc } from '@/stores/settingsStore';
 import logoImg from '@/assets/construct-logo.png';
 
 interface WelcomeScreenProps {
@@ -14,6 +14,8 @@ interface WelcomeScreenProps {
  * Phase 3: Cinematic exit — content lifts away with depth blur, revealing login beneath
  */
 export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
+  const wallpaperSrc = getWallpaperSrc(useSettingsStore((s) => s.wallpaperId));
+
   // Phase 1
   const [helloIn, setHelloIn] = useState(false);
   const [helloOut, setHelloOut] = useState(false);
@@ -85,7 +87,7 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
       <div
         className="absolute inset-0"
         style={{
-          backgroundImage: `url(${wallpaperImg})`,
+          backgroundImage: `url(${wallpaperSrc})`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
         }}
@@ -102,35 +104,21 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
         }}
       />
 
-      {/* Primary ambient glow — soft blue, centered */}
+      {/* Subtle ambient glow — very faint, won't tint the background */}
       <div
         className="absolute pointer-events-none"
         style={{
-          width: '50vw',
-          height: '50vw',
-          maxWidth: 600,
-          maxHeight: 600,
+          width: '60vw',
+          height: '60vw',
+          maxWidth: 700,
+          maxHeight: 700,
           borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(59,130,246,0.10) 0%, rgba(59,130,246,0.03) 50%, transparent 70%)',
-          animation: 'welcome-glow-pulse 5s ease-in-out infinite',
+          background: 'radial-gradient(circle, rgba(255,255,255,0.03) 0%, transparent 60%)',
+          animation: 'welcome-glow-pulse 6s ease-in-out infinite',
         }}
       />
 
-      {/* Secondary ambient glow — wider, warmer */}
-      <div
-        className="absolute pointer-events-none"
-        style={{
-          width: '80vw',
-          height: '80vw',
-          maxWidth: 900,
-          maxHeight: 900,
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(147,197,253,0.04) 0%, transparent 60%)',
-          animation: 'welcome-glow-pulse 7s ease-in-out infinite reverse',
-        }}
-      />
-
-      {/* ── Phase 1: "hello" ── */}
+      {/* ── Phase 1: "hello" — handwriting reveal ── */}
       {showHello && (
         <h1
           className="hello-cursive select-none relative z-10"
@@ -138,26 +126,28 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
             fontSize: 'clamp(5rem, 15vw, 13rem)',
             lineHeight: 1,
             letterSpacing: '-0.01em',
+            // Gradient fill
             background: 'linear-gradient(135deg, #60A5FA 0%, #818CF8 12%, #C084FC 24%, #F472B6 36%, #FB7185 48%, #FB923C 60%, #FBBF24 72%, #34D399 84%, #60A5FA 100%)',
             backgroundSize: '300% 300%',
-            animation: 'hello-gradient 6s linear infinite',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
+            // Handwriting mask — soft-edge gradient driven by --hello-reveal
+            ...(helloIn ? {
+              WebkitMaskImage: 'linear-gradient(to right, black calc(var(--hello-reveal) - 6%), transparent var(--hello-reveal))',
+              maskImage: 'linear-gradient(to right, black calc(var(--hello-reveal) - 6%), transparent var(--hello-reveal))',
+            } : {}),
+            // Gradient color shift runs continuously; handwriting reveal plays once on enter
+            animation: helloIn
+              ? 'hello-gradient 6s linear infinite, hello-write 2.5s cubic-bezier(0.4, 0, 0.2, 1) forwards'
+              : 'none',
+            // Opacity: instant on enter (mask handles the reveal), smooth on exit
             opacity: helloOut ? 0 : helloIn ? 1 : 0,
-            transform: helloOut
-              ? 'translateY(-24px)'
-              : helloIn
-                ? 'translateY(0)'
-                : 'translateY(28px)',
-            filter: helloOut
-              ? 'blur(6px)'
-              : helloIn
-                ? `blur(0px) drop-shadow(0 0 40px rgba(59,130,246,0.3)) drop-shadow(0 0 80px rgba(59,130,246,0.15))`
-                : 'blur(10px)',
+            // Exit: drift upward
+            transform: helloOut ? 'translateY(-24px)' : 'none',
             transition: helloOut
-              ? `opacity 0.7s ease-in, transform 0.7s ease-in, filter 0.7s ease-in`
-              : `opacity 1s ${ease}, transform 1s ${ease}, filter 1s ${ease}`,
+              ? 'opacity 0.7s ease-in, transform 0.7s ease-in'
+              : 'opacity 0.15s ease-out',
           }}
         >
           hello
@@ -213,26 +203,23 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
             Welcome to
           </p>
 
-          {/* Brand name — Geo: geometric, angular, techy */}
+          {/* Brand name */}
           <h1
             style={{
-              fontFamily: "'Geo', sans-serif",
-              fontSize: 'clamp(2.2rem, 6vw, 3.8rem)',
-              lineHeight: 1.15,
-              fontWeight: 400,
-              letterSpacing: '0.04em',
+              fontFamily: "'Space Grotesk', sans-serif",
+              fontSize: 'clamp(2rem, 5vw, 3.2rem)',
+              lineHeight: 1.2,
+              fontWeight: 500,
+              letterSpacing: '-0.02em',
               color: 'white',
               opacity: brandIn ? 1 : 0,
               transform: brandIn ? 'translateY(0)' : 'translateY(16px)',
-              filter: brandIn
-                ? 'drop-shadow(0 1px 8px rgba(0,0,0,0.25))'
-                : 'drop-shadow(0 1px 8px rgba(0,0,0,0))',
-              transition: `opacity 0.7s ${ease}, transform 0.7s ${ease}, filter 0.7s ${ease}`,
+              transition: `opacity 0.7s ${ease}, transform 0.7s ${ease}`,
             }}
           >
             construct
-            <span style={{ color: 'rgba(96,165,250,0.5)' }}>.</span>
-            <span style={{ fontStyle: 'italic', color: 'rgba(96,165,250,0.85)' }}>computer</span>
+            <span style={{ fontWeight: 300, color: 'rgba(255,255,255,0.3)' }}>.</span>
+            <span style={{ fontWeight: 300, color: 'rgba(255,255,255,0.55)' }}>computer</span>
           </h1>
 
           {/* Tagline */}

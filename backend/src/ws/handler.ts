@@ -3,7 +3,7 @@ import { jwt } from '@elysiajs/jwt'
 import { WebSocket as WsWebSocket } from 'ws'
 import { EventEmitter } from 'events'
 import {
-  instances, browserClient, terminalServer, agentClient,
+  instances, browserClient, terminalServer, agentClient, containerManager,
   addDesktopWindow, getDesktopWindows, toolToWindowType, desktopActionToWindowType,
   updateBrowserCache, browserStateCache,
 } from '../services'
@@ -139,6 +139,9 @@ export const wsRoutes = new Elysia()
       }
 
       const messageCallback = (msg: Record<string, unknown>) => {
+        // Skip container-sourced stats — we provide our own via docker stats
+        if (msg.type === 'stats') return
+
         try { ws.send(JSON.stringify(msg)) } catch {}
 
         // Cache browser state for future connections
@@ -167,9 +170,22 @@ export const wsRoutes = new Elysia()
       browserClient.sendMessage(instanceId, { action: 'getTabs' }).catch(() => {})
       browserClient.sendMessage(instanceId, { action: 'getStatus' }).catch(() => {})
 
-      // Store callbacks for cleanup on close
+      // ── Docker stats polling (accurate host-side metrics) ──
+      const sendDockerStats = async () => {
+        try {
+          const stats = await containerManager.getDockerContainerStats(instanceId)
+          if (stats) {
+            try { ws.send(JSON.stringify({ type: 'stats', ...stats })) } catch {}
+          }
+        } catch {}
+      }
+      sendDockerStats() // Send immediately on connect
+      const statsInterval = setInterval(sendDockerStats, 5000)
+
+      // Store callbacks + interval for cleanup on close
       ;(ws.data as any)._frameCallback = frameCallback
       ;(ws.data as any)._messageCallback = messageCallback
+      ;(ws.data as any)._statsInterval = statsInterval
     },
     message(ws, rawMessage) {
       const instanceId = ws.data.params.instanceId
@@ -189,9 +205,11 @@ export const wsRoutes = new Elysia()
 
       const frameCallback = (ws.data as any)._frameCallback
       const messageCallback = (ws.data as any)._messageCallback
+      const statsInterval = (ws.data as any)._statsInterval
 
       if (frameCallback) browserClient.stopScreencast(instanceId, frameCallback)
       if (messageCallback) browserClient.offMessage(instanceId, messageCallback)
+      if (statsInterval) clearInterval(statsInterval)
     },
   })
 

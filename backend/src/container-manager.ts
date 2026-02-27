@@ -1,4 +1,4 @@
-import { spawn, ChildProcess, execSync, execFileSync } from 'child_process'
+import { spawn, ChildProcess, execSync, execFileSync, exec } from 'child_process'
 import { EventEmitter } from 'events'
 import { CONTAINER_PREFIX, SANDBOX_IMAGE, PORT_RANGE_START } from './constants'
 
@@ -12,6 +12,17 @@ export interface ContainerInfo {
     agent: number    // For boneclaw HTTP/WS transport (container 9223 -> host)
   }
   createdAt: Date
+}
+
+export interface DockerContainerStats {
+  cpuPercent: number
+  cpuCount: number
+  memUsedBytes: number
+  memTotalBytes: number
+  pids: number
+  netInBytes: number   // cumulative bytes received
+  netOutBytes: number  // cumulative bytes sent
+  uptime: number       // seconds since container creation
 }
 
 export class ContainerManager extends EventEmitter {
@@ -171,7 +182,6 @@ export class ContainerManager extends EventEmitter {
           --cpus=1 \
           --pids-limit=512 \
           --storage-opt size=20g \
-          --security-opt=no-new-privileges \
           -p ${httpPort}:3000 \
           -p ${browserPort}:9222 \
           -p ${agentPort}:9223 \
@@ -388,6 +398,82 @@ export class ContainerManager extends EventEmitter {
     return {
       containers: this.containers.size,
     }
+  }
+
+  // ── Docker stats (accurate, host-side) ─────────────────────────────────────
+
+  /**
+   * Parse a Docker size string like "26.4MiB", "1GiB", "648B" into bytes.
+   */
+  private parseDockerSize(str: string): number {
+    const match = str.trim().match(/^([\d.]+)\s*([A-Za-z]*)$/)
+    if (!match) return 0
+    const value = parseFloat(match[1])
+    const unit = match[2].toLowerCase()
+    const units: Record<string, number> = {
+      'b': 1, '': 1,
+      'kib': 1024, 'kb': 1000,
+      'mib': 1024 ** 2, 'mb': 1000 ** 2,
+      'gib': 1024 ** 3, 'gb': 1000 ** 3,
+      'tib': 1024 ** 4, 'tb': 1000 ** 4,
+    }
+    return value * (units[unit] || 1)
+  }
+
+  /**
+   * Collect accurate container stats via `docker stats` (non-blocking).
+   * Returns CPU%, memory used/limit, PID count, network I/O, and uptime.
+   * This runs on the host and reads from the Docker daemon directly,
+   * bypassing unreliable in-container cgroup file reads.
+   */
+  getDockerContainerStats(instanceId: string): Promise<DockerContainerStats | null> {
+    const info = this.containers.get(instanceId)
+    if (!info?.id || info.status !== 'running') return Promise.resolve(null)
+
+    return new Promise((resolve) => {
+      exec(
+        `docker stats ${info.id} --no-stream --format '{{json .}}'`,
+        { encoding: 'utf-8', timeout: 5000 },
+        (err, stdout) => {
+          if (err || !stdout) return resolve(null)
+          try {
+            const data = JSON.parse(stdout.trim())
+
+            // CPU%: "0.50%" → 0.5
+            const cpuPercent = parseFloat((data.CPUPerc || '0').replace('%', '')) || 0
+
+            // MemUsage: "26.4MiB / 1GiB" → bytes
+            const memParts = (data.MemUsage || '0B / 0B').split('/')
+            const memUsedBytes = this.parseDockerSize(memParts[0])
+            const memTotalBytes = this.parseDockerSize(memParts[1])
+
+            // PIDs
+            const pids = parseInt(data.PIDs || '0', 10) || 0
+
+            // NetIO: "648B / 0B" → cumulative bytes received / sent
+            const netParts = (data.NetIO || '0B / 0B').split('/')
+            const netInBytes = this.parseDockerSize(netParts[0]?.trim() || '0B')
+            const netOutBytes = this.parseDockerSize(netParts[1]?.trim() || '0B')
+
+            // Uptime from container creation time
+            const uptime = Math.floor((Date.now() - info.createdAt.getTime()) / 1000)
+
+            resolve({
+              cpuPercent,
+              cpuCount: 1,  // from --cpus=1 in docker run
+              memUsedBytes,
+              memTotalBytes,
+              pids,
+              netInBytes,
+              netOutBytes,
+              uptime,
+            })
+          } catch {
+            resolve(null)
+          }
+        }
+      )
+    })
   }
 
   async shutdown(): Promise<void> {

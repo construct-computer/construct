@@ -24,3 +24,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Large binaries
+container/bin/

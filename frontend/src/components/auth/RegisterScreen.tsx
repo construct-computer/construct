@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { Sun, Moon } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
-import { useSettingsStore } from '@/stores/settingsStore';
+import { useSettingsStore, getWallpaperSrc } from '@/stores/settingsStore';
 import { useSound } from '@/hooks/useSound';
-import wallpaperImg from '@/assets/wallpaper.jpg';
 import constructLogo from '@/assets/construct-logo.png';
 
 interface RegisterScreenProps {
@@ -16,7 +15,7 @@ export function RegisterScreen({ onSwitchToLogin }: RegisterScreenProps) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [validationError, setValidationError] = useState('');
   const { register, isLoading, error, clearError } = useAuthStore();
-  const { theme, toggleTheme } = useSettingsStore();
+  const { theme, wallpaperId, toggleTheme } = useSettingsStore();
   const { play } = useSound();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -65,7 +64,7 @@ export function RegisterScreen({ onSwitchToLogin }: RegisterScreenProps) {
       <div
         className="absolute inset-0"
         style={{
-          backgroundImage: `url(${wallpaperImg})`,
+          backgroundImage: `url(${getWallpaperSrc(wallpaperId)})`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
         }}
