@@ -75,11 +75,11 @@ export class ContainerManager extends EventEmitter {
           portMap[parseInt(m[2])] = parseInt(m[1])
         }
 
-        if (portMap[3000] && portMap[9222] && portMap[9223]) {
+        if (portMap[9222] && portMap[9223]) {
           discovered.set(instanceId, {
             containerId: containerId.slice(0, 12),
             ports: {
-              http: portMap[3000],
+              http: portMap[3000] || 0,
               browser: portMap[9222],
               agent: portMap[9223],
             },
@@ -169,7 +169,7 @@ export class ContainerManager extends EventEmitter {
           --hostname sandbox \
           --memory=512m \
           --cpus=1 \
-          --pids-limit=128 \
+          --pids-limit=512 \
           --security-opt=no-new-privileges \
           -p ${httpPort}:3000 \
           -p ${browserPort}:9222 \

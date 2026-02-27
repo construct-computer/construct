@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'child_process'
+import { spawn, execFile, type ChildProcess } from 'child_process'
 import { WebSocket } from 'ws'
 import { CONTAINER_PREFIX } from './constants'
 
@@ -15,22 +15,28 @@ interface ClientMessage {
 interface Session {
   id: string
   instanceId: string
+  container: string
   proc: ChildProcess
   ws: WebSocket
   alive: boolean
+  /** Throttle timer for resize events */
+  resizeTimer: ReturnType<typeof setTimeout> | null
+  /** Pending resize dimensions (set during throttle window) */
+  pendingResize: { cols: number; rows: number } | null
 }
 
 let nextId = 1
 
 /**
- * TerminalServer spawns one `docker exec … bash` process per WebSocket
- * connection and pipes stdin/stdout between them.
+ * TerminalServer spawns one `docker exec` + `script` process per WebSocket
+ * connection, giving bash a real PTY inside the container.
  *
  * Key design decisions:
- *   - Plain `docker exec -i` (no PTY, no `script` wrapper).
- *   - LF→CRLF conversion is done here so xterm.js renders correctly.
- *   - An initial `\n` is sent 200 ms after spawn to flush the prompt.
- *   - stderr noise (job-control warnings) is silently dropped.
+ *   - Uses `script -qc` to allocate a PTY inside the container.
+ *   - PTY handles echo, line editing, CRLF, colors — no manual conversion.
+ *   - All output (stdout+stderr) flows through the PTY to stdout.
+ *   - Resize uses `stty -F /dev/pts/N rows R cols C` on the tmux client's PTY
+ *     via a separate `docker exec`, which triggers SIGWINCH so tmux redraws.
  */
 export class TerminalServer {
   private sessions = new Map<string, Session>()
@@ -48,40 +54,43 @@ export class TerminalServer {
 
     console.log(`[Terminal] #${id} starting for ${container}`)
 
+    // Attach to the shared tmux session inside the container.
+    // IMPORTANT: Must run as 'sandbox' user (UID 1001) because the tmux
+    // session is created by supervisor as sandbox. Running as root would
+    // create a separate tmux "main" in root's socket namespace, so agent
+    // commands (sent via tmux send-keys as sandbox) would never appear.
     const proc = spawn('docker', [
       'exec', '-i',
       '-u', 'sandbox',
       '-e', 'TERM=xterm-256color',
       '-e', 'HOME=/home/sandbox',
       '-e', 'USER=sandbox',
-      '-w', '/home/sandbox/workspace',
       container,
-      '/bin/bash', '-i',
+      'script', '-qc',
+      'tmux attach-session -t main 2>/dev/null || (tmux new-session -d -s main -c /home/sandbox/workspace && tmux attach-session -t main)',
+      '/dev/null',
     ], { stdio: ['pipe', 'pipe', 'pipe'] })
 
-    const session: Session = { id, instanceId, proc, ws, alive: true }
+    const session: Session = {
+      id, instanceId, container, proc, ws,
+      alive: true,
+      resizeTimer: null,
+      pendingResize: null,
+    }
     this.sessions.set(id, session)
 
-    // ── stdout → client ────────────────────────────────────────────
+    // ── stdout → client (PTY output, already has proper CRLF) ──────
     proc.stdout!.on('data', (buf: Buffer) => {
       if (!session.alive) return
-      // Replace bare \n with \r\n so xterm.js does CR+LF
-      const text = buf.toString().replace(/\r?\n/g, '\r\n')
-      this.send(ws, { type: 'output', data: text })
+      this.send(ws, { type: 'output', data: buf.toString() })
     })
 
-    // ── stderr → client (filtered per-line) ───────────────────────
+    // ── stderr → client (minimal with PTY, just relay) ─────────────
     proc.stderr!.on('data', (buf: Buffer) => {
       if (!session.alive) return
       const text = buf.toString()
-      // Strip individual noise lines but keep the rest (e.g. prompt)
-      const filtered = text
-        .split(/\r?\n/)
-        .filter(line => !/cannot set terminal process group|no job control/i.test(line))
-        .join('\n')
-      if (!filtered.trim()) return
-      const cleaned = filtered.replace(/\r?\n/g, '\r\n')
-      this.send(ws, { type: 'output', data: cleaned })
+      if (!text.trim()) return
+      this.send(ws, { type: 'output', data: text })
     })
 
     // ── process lifecycle ──────────────────────────────────────────
@@ -96,14 +105,15 @@ export class TerminalServer {
       this.cleanup(id)
     })
 
-    // ── client → stdin ─────────────────────────────────────────────
+    // ── client → stdin + resize ────────────────────────────────────
     ws.on('message', (raw) => {
       try {
         const msg: ClientMessage = JSON.parse(raw.toString())
         if (msg.type === 'input' && msg.data && proc.stdin) {
           proc.stdin.write(msg.data)
+        } else if (msg.type === 'resize' && msg.cols && msg.rows) {
+          this.handleResize(session, msg.cols, msg.rows)
         }
-        // resize is a no-op without a real PTY
       } catch { /* ignore bad frames */ }
     })
 
@@ -118,15 +128,6 @@ export class TerminalServer {
 
     // ── ready handshake ────────────────────────────────────────────
     this.send(ws, { type: 'ready' })
-
-    // Flush the shell prompt.  Bash in `-i` mode prints its PS1 to
-    // stderr, which may arrive before the frontend wires its handler.
-    // Wait for bash to fully start, then nudge with a newline.
-    setTimeout(() => {
-      if (session.alive && proc.stdin) {
-        proc.stdin.write('\n')
-      }
-    }, 500)
   }
 
   /** Kill all sessions for an instance (container teardown). */
@@ -153,6 +154,56 @@ export class TerminalServer {
     for (const id of [...this.sessions.keys()]) this.cleanup(id)
   }
 
+  // ── resize handling ──────────────────────────────────────────────
+
+  /**
+   * Handle a resize event from the frontend.
+   *
+   * Resizing a PTY allocated by `script` from the outside is done by:
+   *   1. Finding the tmux client's PTY device (e.g. /dev/pts/1)
+   *   2. Running `stty -F /dev/pts/N rows R cols C` in the container
+   * This updates the kernel winsize struct, which triggers SIGWINCH
+   * so tmux (and any child processes) detect the new dimensions.
+   *
+   * Throttled to avoid spawning too many `docker exec` processes
+   * during rapid window resizing.
+   */
+  private handleResize(session: Session, cols: number, rows: number): void {
+    session.pendingResize = { cols, rows }
+
+    if (session.resizeTimer) return // already throttled
+
+    session.resizeTimer = setTimeout(() => {
+      session.resizeTimer = null
+      const pending = session.pendingResize
+      if (!pending || !session.alive) return
+      session.pendingResize = null
+
+      this.doResize(session.container, pending.cols, pending.rows)
+    }, 150) // throttle to max ~7 resizes/sec
+  }
+
+  private doResize(container: string, cols: number, rows: number): void {
+    // Find the tmux client's PTY and resize it in one shot.
+    // `tmux list-clients -F '#{client_tty}'` gives e.g. "/dev/pts/1".
+    // Then `stty -F <pty> rows R cols C` resizes the kernel winsize.
+    const script =
+      `pty=$(tmux list-clients -F '#{client_tty}' 2>/dev/null | head -1); ` +
+      `[ -n "$pty" ] && stty -F "$pty" rows ${rows} cols ${cols} 2>/dev/null`
+
+    execFile('docker', [
+      'exec', '-u', 'sandbox',
+      '-e', 'HOME=/home/sandbox',
+      container,
+      'bash', '-c', script,
+    ], { timeout: 3000 }, (err) => {
+      if (err) {
+        // Non-critical — resize just won't take effect this time.
+        // Common during container startup when tmux isn't ready yet.
+      }
+    })
+  }
+
   // ── helpers ──────────────────────────────────────────────────────
 
   private send(ws: WebSocket, payload: Record<string, unknown>) {
@@ -165,6 +216,7 @@ export class TerminalServer {
     const s = this.sessions.get(id)
     if (!s) return
     s.alive = false
+    if (s.resizeTimer) clearTimeout(s.resizeTimer)
     try { s.proc.kill('SIGKILL') } catch {}
     try { s.ws.close() } catch {}
     this.sessions.delete(id)

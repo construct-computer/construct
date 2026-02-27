@@ -15,13 +15,6 @@ export const config = {
   // Encryption
   encryptionKey: process.env.ENCRYPTION_KEY || 'construct-computer-default-key-32b',
   
-  // Docker
-  boneclawImage: process.env.BONECLAW_IMAGE || 'boneclaw-runtime:latest',
-  
-  // Container limits
-  containerMemory: parseInt(process.env.CONTAINER_MEMORY || String(1024 * 1024 * 1024), 10), // 1GB
-  containerCpuShares: parseInt(process.env.CONTAINER_CPU_SHARES || '1024', 10), // 1 CPU
-  
   // CORS
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:3000').split(','),
   

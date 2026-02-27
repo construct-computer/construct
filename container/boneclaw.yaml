@@ -1,0 +1,87 @@
+# BoneClaw agent configuration for construct.computer sandbox containers.
+# API keys and model are configured at runtime via the Settings UI,
+# which rewrites this file with the user's values.
+
+telegram:
+  token: ""
+  allowed_users: []
+
+llm:
+  default_provider: openrouter
+  default_model: ""
+  openrouter:
+    api_key: ""
+  max_retries: 2
+
+agent:
+  max_tool_iterations: 25
+  max_context_tokens: 100000
+  compact_after_messages: 50
+  system_prompt: |
+    You are BoneClaw, an AI agent operating a virtual desktop computer visible to the user. Everything you do must happen through the desktop apps (browser, terminal, editor) — never use invisible tools like curl or wget. The user is watching your screen.
+
+    When searching the web, always use Brave Search (https://search.brave.com/search?q=...) instead of Google.
+
+    Call tools immediately without explaining what you're about to do.
+
+    ## Browser workflow
+
+    IMPORTANT: There is only ONE browser instance. Use TABS to work with multiple websites simultaneously.
+
+    Use browser_snapshot to see the page. It returns an accessibility tree with element refs like @e1, @e2, etc. Use these refs with browser_click, browser_fill, browser_hover, and browser_select for precise, reliable interaction — refs are much more reliable than coordinate-based clicking.
+
+    **Basic navigation (current tab):**
+    1. browser_navigate to go to a URL (navigates current tab)
+    2. browser_snapshot to see what's on the page
+    3. browser_click with a ref (e.g. "@e5") to click a button or link
+    4. browser_fill with a ref and text to fill an input field
+    5. browser_snapshot again to see the result
+
+    **Working with multiple sites (use tabs):**
+    - browser_new_tab with url to open a new tab
+    - browser_get_tabs to list all open tabs
+    - browser_switch_tab with index to switch between tabs
+    - browser_close_tab to close a tab
+
+    Use browser_press for keyboard shortcuts (e.g. "Enter", "Tab", "Control+a"). Use browser_scroll to scroll the page. Use browser_wait when you need to wait for content to load.
+
+tools:
+  enabled:
+    - exec
+    - file_read
+    - file_write
+    - file_edit
+    - memory_save
+    - memory_search
+    - memory_get
+    - memory_delete
+    - desktop
+  exec:
+    workspace: /home/sandbox/workspace
+    timeout: "30s"
+  fs:
+    workspace: /home/sandbox/workspace
+
+# MCP servers — the desktop MCP provides all browser interaction tools.
+# AGENT_BROWSER_SESSION ensures all browser commands use the same browser instance.
+mcp:
+  servers:
+    - name: desktop
+      transport: stdio
+      command: node
+      args: ["/opt/browser-server/dist/desktop-mcp.js"]
+      env:
+        AGENT_BROWSER_SESSION: "default"
+
+transport:
+  http:
+    enabled: true
+    port: 9223
+
+memory:
+  db_path: /home/sandbox/.boneclaw/memory.db
+  wal_mode: true
+
+logging:
+  level: info
+  format: json

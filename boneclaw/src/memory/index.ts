@@ -89,15 +89,34 @@ export class Memory {
   }
 
   /**
+   * Strip image content from a message to prevent memory/log bloat.
+   * Multimodal messages (content arrays with image_url parts) are collapsed to text-only.
+   */
+  private stripImageContent(message: Message): Message {
+    if (!Array.isArray(message.content)) return message;
+
+    const textParts = (message.content as Array<{ type: string; text?: string }>)
+      .filter(part => part.type === 'text')
+      .map(part => part.text || '');
+
+    return {
+      ...message,
+      content: textParts.join('\n') || '[visual content stripped]',
+    };
+  }
+
+  /**
    * Add a message to short-term memory
    */
   addMessage(message: Message): void {
-    this.data.shortTerm.push(message);
+    // Strip image content — screenshots are too large for persistence
+    const cleanMsg = this.stripImageContent(message);
+    this.data.shortTerm.push(cleanMsg);
     this.data.lastActivity = Date.now();
     this.dirty = true;
     
     // Log to daily file
-    this.logToDaily(message);
+    this.logToDaily(cleanMsg);
   }
 
   /**

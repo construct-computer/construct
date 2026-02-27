@@ -39,7 +39,7 @@ export function LoginScreen({ onSwitchToRegister }: LoginScreenProps) {
     <div className="relative min-h-screen flex items-center justify-center overflow-hidden">
       {/* Wallpaper background */}
       <div
-        className="absolute inset-0 invert dark:invert-0"
+        className="absolute inset-0"
         style={{
           backgroundImage: `url(${wallpaperImg})`,
           backgroundSize: 'cover',
@@ -77,9 +77,10 @@ export function LoginScreen({ onSwitchToRegister }: LoginScreenProps) {
         />
 
         {/* Name */}
-        <h1 className="text-xl font-semibold text-black/90 dark:text-white mb-1
-                       drop-shadow-[0_1px_2px_rgba(0,0,0,0.3)]">
-          construct.computer
+        <h1 className="text-xl text-black/90 dark:text-white mb-1
+                       drop-shadow-[0_1px_2px_rgba(0,0,0,0.3)]"
+            style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700 }}>
+          construct.<em className="italic">computer</em>
         </h1>
         <p className="text-sm text-black/50 dark:text-white/50 mb-6
                       drop-shadow-[0_1px_1px_rgba(0,0,0,0.2)]">
@@ -113,7 +114,6 @@ export function LoginScreen({ onSwitchToRegister }: LoginScreenProps) {
                 }}
                 placeholder="Username"
                 autoComplete="username"
-                autoFocus
                 className="w-full px-3.5 py-2.5 text-sm rounded-lg
                            bg-white/60 dark:bg-white/8
                            border border-black/10 dark:border-white/12

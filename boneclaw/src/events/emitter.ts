@@ -4,17 +4,35 @@ import type { AgentEvent, WindowState, WindowType } from './types';
 const windows: Map<string, WindowState> = new Map();
 let windowIdCounter = 0;
 
+// Event broadcast callback (set by server.ts)
+let broadcastCallback: ((event: AgentEvent) => void) | null = null;
+
 /**
- * Emit an event as a JSON line to stdout
- * The backend captures these and forwards to the frontend via WebSocket
+ * Register a callback to broadcast events to WebSocket clients
  */
-export function emit(event: Omit<AgentEvent, 'timestamp'>): void {
+export function setBroadcastCallback(callback: (event: AgentEvent) => void): void {
+  broadcastCallback = callback;
+}
+
+/**
+ * Emit an event - sends to WebSocket clients and optionally stdout
+ * The backend captures these and forwards to the frontend via WebSocket
+ * 
+ * Note: Uses Record<string, unknown> for flexibility with event properties.
+ * The actual event type is determined by the 'type' field.
+ */
+export function emit(event: Record<string, unknown> & { type: string }): void {
   const fullEvent = {
     ...event,
     timestamp: Date.now(),
-  };
+  } as AgentEvent;
   
-  // Write as JSON line to stdout
+  // Broadcast to WebSocket clients if available
+  if (broadcastCallback) {
+    broadcastCallback(fullEvent);
+  }
+  
+  // Also write to stdout for debugging/logging
   console.log(JSON.stringify(fullEvent));
 }
 

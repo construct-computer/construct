@@ -16,7 +16,7 @@ export function AboutWindow({ config: _config }: AboutWindowProps) {
         draggable={false}
       />
       
-      <h1 className="text-xl font-bold">construct.computer</h1>
+      <h1 className="text-xl" style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700 }}>construct.<em className="italic">computer</em></h1>
       <p className="text-sm text-[var(--color-text-muted)] mt-1">
         Version 0.1.0
       </p>

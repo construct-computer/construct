@@ -339,16 +339,4 @@ export const browserWS = new BrowserWSClient();
 export const terminalWS = new TerminalWSClient();
 export const agentWS = new AgentWSClient();
 
-// Legacy export for compatibility (not used anymore)
-export const wsClient = {
-  connect: () => {},
-  disconnect: () => {},
-  isConnected: () => false,
-  onEvent: () => () => {},
-  onConnection: () => () => {},
-  subscribe: () => {},
-  unsubscribe: () => {},
-  sendAgentMessage: () => {},
-  sendTerminalInput: () => {},
-  send: () => {},
-};
+

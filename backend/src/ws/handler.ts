@@ -162,6 +162,11 @@ export const wsRoutes = new Elysia()
       browserClient.startScreencast(instanceId, frameCallback)
       browserClient.onMessage(instanceId, messageCallback)
 
+      // Request an initial frame + status so the frontend isn't blank
+      browserClient.sendMessage(instanceId, { action: 'getFrame' }).catch(() => {})
+      browserClient.sendMessage(instanceId, { action: 'getTabs' }).catch(() => {})
+      browserClient.sendMessage(instanceId, { action: 'getStatus' }).catch(() => {})
+
       // Store callbacks for cleanup on close
       ;(ws.data as any)._frameCallback = frameCallback
       ;(ws.data as any)._messageCallback = messageCallback
@@ -323,18 +328,12 @@ export const wsRoutes = new Elysia()
             }))
           } catch {}
           
-          // Send the message to the agent and relay the response back
+          // Send the message to the agent. The response text is NOT sent
+          // back here because boneclaw already streams it as text_delta
+          // events via the /events WebSocket (relayed by eventCallback
+          // registered in the open handler above). Sending the POST
+          // response as another text_delta would duplicate the text.
           agentClient.sendMessage(instanceId, msg.message, sessionKey)
-            .then((response) => {
-              // Send the agent's response back to the frontend as a text_delta event
-              try {
-                ws.send(JSON.stringify({
-                  type: 'text_delta',
-                  timestamp: Date.now(),
-                  data: { delta: response },
-                }))
-              } catch {}
-            })
             .catch((err) => {
               const message = err instanceof Error ? err.message : String(err)
               try {

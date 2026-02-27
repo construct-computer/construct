@@ -141,7 +141,6 @@ export function SetupWizard({ config, onComplete }: SetupWizardProps) {
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder="sk-or-v1-..."
                   className="pl-10"
-                  autoFocus
                 />
               </div>
               <p className="text-xs text-[var(--color-text-muted)]">

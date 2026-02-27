@@ -1,6 +1,5 @@
 import { createUser, getUserByUsername, getUserById } from '../db/client';
 import { hashPassword, verifyPassword } from './crypto.service';
-import { getUserComputer } from './agent.service';
 import type { User } from '../db/schema';
 
 export interface AuthResult {
@@ -37,8 +36,7 @@ export async function register(username: string, password: string): Promise<Auth
   const passwordHash = await hashPassword(password);
   const user = createUser(username, passwordHash);
   
-  // Create the user's computer (single agent/container)
-  await getUserComputer(user.id, user.username);
+  // Container is created on-demand when user hits GET /api/instances/me
   
   return {
     success: true,

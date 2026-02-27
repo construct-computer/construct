@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Wifi, WifiOff, Settings, Sun, Moon, Volume2, VolumeOff } from 'lucide-react';
+import { Wifi, WifiOff, Settings, Sun, Moon, Volume2, VolumeOff, Lock, RotateCcw } from 'lucide-react';
 import { useWindowStore } from '@/stores/windowStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { MENUBAR_HEIGHT, Z_INDEX } from '@/lib/constants';
@@ -11,6 +11,8 @@ import constructLogo from '@/assets/construct-logo.png';
 
 interface MenuBarProps {
   onLogout?: () => void;
+  onLockScreen?: () => void;
+  onRestart?: () => void;
   isConnected?: boolean;
 }
 
@@ -18,7 +20,7 @@ interface MenuState {
   open: string | null;
 }
 
-export function MenuBar({ onLogout, isConnected }: MenuBarProps) {
+export function MenuBar({ onLogout, onLockScreen, onRestart, isConnected }: MenuBarProps) {
   const [menu, setMenu] = useState<MenuState>({ open: null });
   const [time, setTime] = useState(new Date());
   const menuRef = useRef<HTMLDivElement>(null);
@@ -75,7 +77,7 @@ export function MenuBar({ onLogout, isConnected }: MenuBarProps) {
       style={{ height: MENUBAR_HEIGHT, zIndex: Z_INDEX.taskbar }}
     >
       {/* Logo menu */}
-      <div className="relative flex items-center ml-1.5">
+      <div className="relative flex items-center ml-3">
         <button
           ref={logoButtonRef}
           className={`p-1 flex items-center justify-center rounded-md transition ${
@@ -112,6 +114,16 @@ export function MenuBar({ onLogout, isConnected }: MenuBarProps) {
               onClick={() => { toggleSound(); }}
             />
             <MenuDivider />
+            <MenuItem
+              label="Lock Screen"
+              icon={<Lock className="w-3.5 h-3.5" />}
+              onClick={() => { onLockScreen?.(); setMenu({ open: null }); }}
+            />
+            <MenuItem
+              label="Restart..."
+              icon={<RotateCcw className="w-3.5 h-3.5" />}
+              onClick={() => { onRestart?.(); setMenu({ open: null }); }}
+            />
             <MenuItem
               label="Log Out..."
               className="text-red-500 dark:text-red-400"

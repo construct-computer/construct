@@ -63,7 +63,7 @@ export function RegisterScreen({ onSwitchToLogin }: RegisterScreenProps) {
     <div className="relative min-h-screen flex items-center justify-center overflow-hidden">
       {/* Wallpaper background */}
       <div
-        className="absolute inset-0 invert dark:invert-0"
+        className="absolute inset-0"
         style={{
           backgroundImage: `url(${wallpaperImg})`,
           backgroundSize: 'cover',
@@ -139,7 +139,6 @@ export function RegisterScreen({ onSwitchToLogin }: RegisterScreenProps) {
                   }}
                   placeholder="Username"
                   autoComplete="username"
-                  autoFocus
                   className="w-full px-3.5 py-2.5 text-sm rounded-lg
                              bg-white/60 dark:bg-white/8
                              border border-black/10 dark:border-white/12

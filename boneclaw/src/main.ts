@@ -2,7 +2,8 @@
 
 import { loadConfig, getConfigSummary } from './config';
 import { runAutonomousLoop, runSingleInteraction } from './agent/autonomous';
-import { emit } from './events/emitter';
+import { emit, setBroadcastCallback } from './events/emitter';
+import { startServer, broadcastEvent } from './server';
 
 /**
  * Parse command line arguments
@@ -77,11 +78,28 @@ EXAMPLES:
 }
 
 /**
- * Run interactive mode - reads messages from stdin
+ * Run interactive mode - runs HTTP server and reads messages from stdin
  */
 async function runInteractiveMode(config: ReturnType<typeof loadConfig>): Promise<void> {
   const { AgentLoop } = await import('./agent/loop');
   const agentLoop = new AgentLoop({ config });
+  const startTime = Date.now();
+  
+  // Wire up the broadcast callback so events go to WebSocket clients
+  setBroadcastCallback(broadcastEvent);
+  
+  // Start HTTP server on port 9223 (default agent port)
+  const port = parseInt(process.env.BONECLAW_PORT || '9223', 10);
+  startServer({
+    port,
+    agentLoop,
+    memory: agentLoop.getMemory(),
+    startTime,
+    config: {
+      model: config.openrouter.model,
+      provider: 'openrouter',
+    },
+  });
   
   emit({
     type: 'agent:started',
@@ -91,12 +109,12 @@ async function runInteractiveMode(config: ReturnType<typeof loadConfig>): Promis
     },
   });
   
-  // Read lines from stdin
+  // Read lines from stdin (for local testing/debugging)
   const reader = Bun.stdin.stream().getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   
-  process.stderr.write(`BoneClaw ready. Send messages via stdin.\n`);
+  process.stderr.write(`BoneClaw ready. HTTP server on port ${port}. Send messages via stdin or POST /chat.\n`);
   
   while (true) {
     const { done, value } = await reader.read();
@@ -147,11 +165,11 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   
-  // Validate API key
+  // Warn about missing API key but don't crash — the HTTP server
+  // needs to be running so the backend can connect and the user can
+  // configure the key via the Settings UI.
   if (!config.openrouter.apiKey) {
-    console.error('Error: OPENROUTER_API_KEY is required');
-    console.error('Set it in your environment or config file.');
-    process.exit(1);
+    process.stderr.write('Warning: OPENROUTER_API_KEY is not set. Agent will start but cannot process messages until configured.\n');
   }
   
   // Log config summary to stderr (stdout is for events)

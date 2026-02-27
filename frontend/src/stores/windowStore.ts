@@ -44,6 +44,9 @@ interface WindowStore {
   
   // Ensure a window of this type is open and focused (no duplicates)
   ensureWindowOpen: (type: WindowType) => void;
+  
+  // Open multiple windows arranged in a tidy grid
+  openWindowsGrid: (types: WindowType[]) => void;
 }
 
 // Window type default configurations
@@ -130,6 +133,63 @@ const windowDefaults: Record<WindowType, Partial<WindowConfig>> = {
     maxHeight: 700,
   },
 };
+
+/**
+ * Compute a grid layout for N windows within the available screen area.
+ * Returns an array of { x, y, width, height } for each window.
+ */
+function computeGridLayout(
+  types: WindowType[],
+  screenWidth: number,
+  screenHeight: number,
+): Array<{ x: number; y: number; width: number; height: number }> {
+  const count = types.length;
+  if (count === 0) return [];
+
+  const padding = 16; // outer padding
+  const gap = 12;     // gap between windows
+
+  const availW = screenWidth - padding * 2;
+  const availH = screenHeight - padding * 2;
+
+  // Determine grid dimensions (cols x rows)
+  let cols: number;
+  let rows: number;
+  if (count === 1) {
+    cols = 1; rows = 1;
+  } else if (count === 2) {
+    cols = 2; rows = 1;
+  } else if (count <= 4) {
+    cols = 2; rows = 2;
+  } else if (count <= 6) {
+    cols = 3; rows = 2;
+  } else {
+    cols = 3; rows = Math.ceil(count / 3);
+  }
+
+  const cellW = Math.floor((availW - gap * (cols - 1)) / cols);
+  const cellH = Math.floor((availH - gap * (rows - 1)) / rows);
+
+  return types.map((type, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+
+    const defaults = windowDefaults[type] || {};
+    const minW = defaults.minWidth ?? MIN_WINDOW_WIDTH;
+    const minH = defaults.minHeight ?? MIN_WINDOW_HEIGHT;
+
+    // Use the cell size but respect min constraints
+    const w = Math.max(minW, cellW);
+    const h = Math.max(minH, cellH);
+
+    return {
+      x: padding + col * (cellW + gap),
+      y: padding + row * (cellH + gap),
+      width: w,
+      height: h,
+    };
+  });
+}
 
 // Calculate cascaded position (offset from previous windows)
 function getCascadedPosition(windows: WindowConfig[], width: number, height: number): { x: number; y: number } {
@@ -264,7 +324,7 @@ export const useWindowStore = create<WindowStore>()(
       if (!window) return;
       
       const screenWidth = globalThis.innerWidth;
-      const screenHeight = globalThis.innerHeight - MENUBAR_HEIGHT - DOCK_HEIGHT;
+      const screenHeight = globalThis.innerHeight - MENUBAR_HEIGHT;
       
       set({
         windows: windows.map((w) =>
@@ -435,6 +495,38 @@ export const useWindowStore = create<WindowStore>()(
         return;
       }
       get().openWindow(type);
+    },
+    
+    openWindowsGrid: (types) => {
+      if (types.length === 0) return;
+      
+      // Filter out types that already have an open window
+      const { windows } = get();
+      const newTypes: WindowType[] = [];
+      for (const type of types) {
+        const existing = windows.find((w) => w.type === type);
+        if (existing) {
+          // Just focus / restore it
+          get().focusWindow(existing.id);
+        } else {
+          newTypes.push(type);
+        }
+      }
+      
+      if (newTypes.length === 0) return;
+      
+      const screenWidth = globalThis.innerWidth;
+      const screenHeight = globalThis.innerHeight - MENUBAR_HEIGHT;
+      const grid = computeGridLayout(newTypes, screenWidth, screenHeight);
+      
+      for (let i = 0; i < newTypes.length; i++) {
+        get().openWindow(newTypes[i], {
+          x: grid[i].x,
+          y: grid[i].y,
+          width: grid[i].width,
+          height: grid[i].height,
+        });
+      }
     },
   }))
 );

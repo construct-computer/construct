@@ -1,11 +1,11 @@
 import type { Config } from '../config';
-import type { Message, ParsedToolCall } from '../llm/types';
+import type { Message, ContentPart, ParsedToolCall } from '../llm/types';
 import { OpenRouterClient } from '../llm/openrouter';
 import { Memory } from '../memory';
 import { buildSystemPrompt, buildTaskPrompt, buildHeartbeatPrompt } from './prompt';
 import { getToolDefinitions, executeTool } from '../tools/registry';
 import { emit, emitTextDelta, emitThinking, emitComplete, emitError } from '../events/emitter';
-import type { ToolContext } from '../tools/types';
+import type { ToolContext, ToolResult } from '../tools/types';
 
 const MAX_TOOL_ITERATIONS = 20;
 
@@ -43,6 +43,11 @@ export class AgentLoop {
    * Run a single agent turn with a user message
    */
   async run(userMessage: string): Promise<string> {
+    if (!this.config.openrouter.apiKey) {
+      emitError('API key not configured. Please set your OpenRouter API key in Settings.');
+      return 'Error: API key not configured. Please set your OpenRouter API key in Settings.';
+    }
+    
     const systemPrompt = buildSystemPrompt(this.config, this.memory);
     
     // Add user message to memory
@@ -58,14 +63,28 @@ export class AgentLoop {
     
     let iterations = 0;
     let finalResponse = '';
+    // Track whether the model supports vision (images). Starts true; set to false
+    // on first failure so we don't keep retrying with images on every iteration.
+    let visionSupported = true;
     
     while (iterations < MAX_TOOL_ITERATIONS) {
       iterations++;
       
       try {
+        // If vision isn't supported, strip image content from messages before sending
+        const llmMessages = visionSupported
+          ? messages
+          : messages.map(m => {
+              if (!Array.isArray(m.content)) return m;
+              const textParts = (m.content as ContentPart[])
+                .filter(p => p.type === 'text')
+                .map(p => (p as { type: 'text'; text: string }).text);
+              return { ...m, content: textParts.join('\n') || '[visual content]' };
+            });
+        
         // Get LLM response with streaming
         const { content, toolCalls } = await this.llm.streamAndCollect(
-          messages,
+          llmMessages,
           getToolDefinitions(),
           {
             onEvent: (event) => {
@@ -76,13 +95,34 @@ export class AgentLoop {
           }
         );
         
-        // Handle text response
+        // Build a single assistant message with both content and tool_calls
+        // (if present). The OpenAI API requires that any tool result message
+        // references a tool_call_id that exists in the preceding assistant
+        // message's tool_calls array. Pushing content and tool_calls as
+        // separate messages creates a malformed history that causes the LLM
+        // to repeat itself on the next iteration.
+        const assistantMsg: Message = {
+          role: 'assistant',
+          content: content || null,
+        };
+        
+        if (toolCalls.length > 0) {
+          assistantMsg.tool_calls = toolCalls.map(tc => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: {
+              name: tc.name,
+              arguments: JSON.stringify(tc.arguments),
+            },
+          }));
+        }
+        
+        messages.push(assistantMsg);
+        this.memory.addMessage(assistantMsg);
+        this.onMessage?.(assistantMsg);
+        
         if (content) {
           finalResponse = content;
-          const assistantMsg: Message = { role: 'assistant', content };
-          messages.push(assistantMsg);
-          this.memory.addMessage(assistantMsg);
-          this.onMessage?.(assistantMsg);
         }
         
         // If no tool calls, we're done
@@ -90,34 +130,23 @@ export class AgentLoop {
           break;
         }
         
-        // Build assistant message with tool calls
-        const assistantMsgWithTools: Message = {
-          role: 'assistant',
-          content: content || null,
-          tool_calls: toolCalls.map(tc => ({
-            id: tc.id,
-            type: 'function' as const,
-            function: {
-              name: tc.name,
-              arguments: JSON.stringify(tc.arguments),
-            },
-          })),
-        };
-        
-        if (!content) {
-          messages.push(assistantMsgWithTools);
-        }
-        
         // Execute tool calls
         const context: ToolContext = {
           workdir: this.config.workspace,
-          emit,
+          emit: (event: unknown) => emit(event as Record<string, unknown> & { type: string }),
         };
+        
+        let lastScreenshot: string | undefined;
         
         for (const toolCall of toolCalls) {
           const result = await executeTool(toolCall, context);
           
-          // Add tool result to messages
+          // Capture the last screenshot from browser tool results
+          if (result.screenshot) {
+            lastScreenshot = result.screenshot;
+          }
+          
+          // Add tool result to messages (text only — screenshot goes as separate image)
           const toolMsg: Message = {
             role: 'tool',
             content: result.output,
@@ -128,8 +157,48 @@ export class AgentLoop {
           this.onMessage?.(toolMsg);
         }
         
+        // If any browser tool returned a screenshot, inject it as a user message
+        // with an image so the LLM can visually see the current page state.
+        // Only include the LAST screenshot (final state after all actions).
+        if (lastScreenshot) {
+          const visualMsg: Message = {
+            role: 'user',
+            content: [
+              { type: 'text', text: '[Screenshot of the current browser page]' },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:image/png;base64,${lastScreenshot}`,
+                  detail: 'low',
+                },
+              },
+            ],
+          };
+          messages.push(visualMsg);
+          // Don't persist to memory — images are too large for storage
+          // The agent gets fresh screenshots on every browser action
+        }
+        
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
+        const lowerErr = errorMsg.toLowerCase();
+        
+        // Detect vision/image-related errors and disable vision for future iterations.
+        // This lets the agent continue working with text-only context.
+        const isVisionError = visionSupported && (
+          lowerErr.includes('image') || lowerErr.includes('vision') ||
+          lowerErr.includes('multimodal') || lowerErr.includes('content_part') ||
+          lowerErr.includes('content type') || lowerErr.includes('image_url')
+        );
+        
+        if (isVisionError) {
+          console.error('[AgentLoop] Model does not support vision, disabling image injection');
+          visionSupported = false;
+          // Don't break — retry this iteration without images
+          iterations--;
+          continue;
+        }
+        
         emitError(errorMsg);
         
         // Break on LLM errors (rate limits, API errors)
@@ -181,6 +250,13 @@ export class AgentLoop {
    */
   getMemorySummary() {
     return this.memory.getSummary();
+  }
+
+  /**
+   * Get memory instance (for server to access conversation history)
+   */
+  getMemory(): Memory {
+    return this.memory;
   }
 
   /**

@@ -10,10 +10,12 @@ import { MENUBAR_HEIGHT, DOCK_HEIGHT } from '@/lib/constants';
 
 interface DesktopProps {
   onLogout?: () => void;
+  onLockScreen?: () => void;
+  onRestart?: () => void;
   isConnected?: boolean;
 }
 
-export function Desktop({ onLogout, isConnected }: DesktopProps) {
+export function Desktop({ onLogout, onLockScreen, onRestart, isConnected }: DesktopProps) {
   const { openWindow, windows } = useWindowStore();
   const hasApiKey = useComputerStore((s) => s.hasApiKey);
   const configChecked = useComputerStore((s) => s.configChecked);
@@ -57,12 +59,12 @@ export function Desktop({ onLogout, isConnected }: DesktopProps) {
       <Wallpaper />
 
       {/* Menu bar (top) */}
-      <MenuBar onLogout={onLogout} isConnected={isConnected} />
+      <MenuBar onLogout={onLogout} onLockScreen={onLockScreen} onRestart={onRestart} isConnected={isConnected} />
 
-      {/* Window area - between menu bar and dock */}
+      {/* Window area - from menu bar to screen edge (windows can go behind dock) */}
       <div
-        className="absolute left-0 right-0"
-        style={{ top: MENUBAR_HEIGHT, bottom: DOCK_HEIGHT }}
+        className="absolute left-0 right-0 bottom-0"
+        style={{ top: MENUBAR_HEIGHT }}
       >
         <WindowManager />
       </div>

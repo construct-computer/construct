@@ -1,13 +1,31 @@
 import type { Tool, ToolResult, ToolContext } from './types';
-import { spawn } from 'child_process';
-import { emit, openWindow, updateWindow, closeWindow } from '../events/emitter';
-
-// Track terminal windows
-const terminalWindows: Map<string, string> = new Map(); // pid -> windowId
-let terminalCounter = 0;
+import { spawn, execSync } from 'child_process';
+import { emit } from '../events/emitter';
 
 /**
- * Execute a shell command
+ * Send a command to the shared tmux session so it executes visibly in the
+ * frontend terminal. The user sees the command prompt, output, and exit —
+ * exactly as if they typed it themselves.
+ *
+ * The actual output is captured separately via child_process (below) so we
+ * can return structured results to the agent. This means the command runs
+ * twice, but that's an acceptable tradeoff for real-time visibility.
+ */
+function runInTmux(command: string): void {
+  try {
+    const escaped = command.replace(/'/g, "'\\''");
+    execSync(
+      `tmux send-keys -t main '${escaped}' Enter`,
+      { stdio: 'ignore', timeout: 2000 }
+    );
+  } catch {
+    // tmux may not be available — ignore
+  }
+}
+
+/**
+ * Execute a shell command via child_process and capture output.
+ * Also runs the command in tmux for frontend visibility.
  */
 async function execCommand(
   command: string,
@@ -15,6 +33,10 @@ async function execCommand(
   env?: Record<string, string>,
   timeout?: number
 ): Promise<{ stdout: string; stderr: string; code: number }> {
+  // Run in tmux so the user sees it in the frontend terminal
+  runInTmux(command);
+
+  // Run via child_process to capture output for the agent
   return new Promise((resolve) => {
     const proc = spawn('bash', ['-c', command], {
       cwd,
@@ -26,38 +48,36 @@ async function execCommand(
     let stderr = '';
 
     proc.stdout.on('data', (data) => {
-      const text = data.toString();
-      stdout += text;
-      emit({ type: 'terminal:output', data: text });
+      stdout += data.toString();
     });
 
     proc.stderr.on('data', (data) => {
-      const text = data.toString();
-      stderr += text;
-      emit({ type: 'terminal:output', data: text });
+      stderr += data.toString();
     });
 
     proc.on('close', (code) => {
-      emit({ type: 'terminal:exit', code: code ?? 0 });
       resolve({ stdout: stdout.trim(), stderr: stderr.trim(), code: code ?? 0 });
     });
 
     proc.on('error', (err) => {
-      emit({ type: 'terminal:exit', code: 1 });
       resolve({ stdout: '', stderr: err.message, code: 1 });
     });
   });
 }
 
 /**
- * Exec tool handler
+ * Exec tool handler.
+ *
+ * The frontend automatically opens/focuses the Terminal window when it
+ * receives a tool_call event for 'exec' (via toolToWindowType mapping
+ * in agentStore). We don't need to emit window:open events here.
  */
 async function execHandler(
   args: Record<string, unknown>,
   context: ToolContext
 ): Promise<ToolResult> {
   const command = args.command as string;
-  
+
   if (!command) {
     return { success: false, output: 'Command is required' };
   }
@@ -66,23 +86,8 @@ async function execHandler(
   const env = args.env as Record<string, string> | undefined;
   const timeout = args.timeout as number | undefined;
 
-  // Open terminal window in UI
-  const windowId = openWindow('terminal', `Terminal ${++terminalCounter}`);
-  
-  // Emit command being executed
-  emit({ type: 'terminal:command', command, cwd: workdir });
-
   try {
     const result = await execCommand(command, workdir, env, timeout);
-
-    // Close terminal window after completion (optional - could keep open)
-    // For now, we'll update it with the final output
-    updateWindow(windowId, { 
-      command, 
-      output: result.stdout + (result.stderr ? `\n${result.stderr}` : ''),
-      exitCode: result.code,
-      completed: true,
-    });
 
     if (result.code !== 0) {
       return {
@@ -98,7 +103,6 @@ async function execHandler(
       data: { exitCode: result.code, stdout: result.stdout, stderr: result.stderr },
     };
   } catch (error) {
-    closeWindow(windowId);
     const errorMsg = error instanceof Error ? error.message : String(error);
     return {
       success: false,

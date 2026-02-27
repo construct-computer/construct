@@ -5,7 +5,7 @@ import { useSound } from '@/hooks/useSound';
 import { TitleBar } from './TitleBar';
 import { ResizeHandles } from './ResizeHandles';
 import type { WindowConfig, ResizeHandle } from '@/types';
-import { MENUBAR_HEIGHT, DOCK_HEIGHT } from '@/lib/constants';
+import { MENUBAR_HEIGHT } from '@/lib/constants';
 
 interface WindowProps {
   config: WindowConfig;
@@ -117,9 +117,10 @@ export function Window({ config, children }: WindowProps) {
         let newX = dragRef.current.startWindowX + dx;
         let newY = dragRef.current.startWindowY + dy;
         
-        // Constrain fully within the window area
+        // Constrain: top edge at menu bar, other edges at screen bounds
+        // Windows can move behind the dock
         const areaWidth = window.innerWidth;
-        const areaHeight = window.innerHeight - MENUBAR_HEIGHT - DOCK_HEIGHT;
+        const areaHeight = window.innerHeight - MENUBAR_HEIGHT;
         
         newX = Math.max(0, Math.min(newX, areaWidth - config.width));
         newY = Math.max(0, Math.min(newY, areaHeight - config.height));

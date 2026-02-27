@@ -5,6 +5,12 @@ import { emit, openWindow, updateWindow, closeWindow } from '../events/emitter';
 // Track browser window ID
 let browserWindowId: string | null = null;
 
+// Actions that change the visible page — auto-snapshot + screenshot after these
+const PAGE_CHANGING_ACTIONS = new Set([
+  'open', 'click', 'fill', 'type', 'press', 'scroll', 'hover',
+  'tab_switch', 'tab_new', 'snapshot',
+]);
+
 /**
  * Execute agent-browser CLI command
  */
@@ -12,7 +18,8 @@ async function runAgentBrowser(args: string[], cwd: string): Promise<{ stdout: s
   return new Promise((resolve) => {
     const proc = spawn('agent-browser', args, {
       cwd,
-      env: { ...process.env },
+      timeout: 60_000,
+      env: { ...process.env, AGENT_BROWSER_SESSION: 'default', PLAYWRIGHT_TIMEOUT: '45000' },
     });
 
     let stdout = '';
@@ -37,6 +44,68 @@ async function runAgentBrowser(args: string[], cwd: string): Promise<{ stdout: s
 }
 
 /**
+ * Take a screenshot and return it as base64, or undefined on failure
+ */
+async function takeScreenshot(cwd: string): Promise<string | undefined> {
+  try {
+    const ssPath = '/tmp/agent-context.png';
+    const ss = await runAgentBrowser(['screenshot', ssPath], cwd);
+    if (ss.code === 0) {
+      const file = Bun.file(ssPath);
+      if (await file.exists()) {
+        const buf = await file.arrayBuffer();
+        return Buffer.from(buf).toString('base64');
+      }
+    }
+  } catch { /* ignore screenshot errors */ }
+  return undefined;
+}
+
+const MAX_SNAPSHOT_CHARS = 8000;
+
+/**
+ * Enhance a browser tool result with auto-snapshot and screenshot for visual context.
+ * Called after page-changing actions so the LLM can "see" the page and has refs ready.
+ */
+async function enhanceWithVisualContext(
+  basicResult: ToolResult,
+  action: string,
+  cwd: string
+): Promise<ToolResult> {
+  if (!basicResult.success) return basicResult;
+  if (!PAGE_CHANGING_ACTIONS.has(action)) return basicResult;
+
+  // Wait for the page to settle after the action
+  const waitMs = action === 'open' || action === 'tab_new' ? 800 : 400;
+  await new Promise(r => setTimeout(r, waitMs));
+
+  let output = basicResult.output;
+
+  // For non-snapshot actions, auto-take a snapshot to provide element refs
+  // (snapshot action already has its own output with refs)
+  if (action !== 'snapshot') {
+    try {
+      const snap = await runAgentBrowser(['snapshot', '-i', '-c'], cwd);
+      if (snap.code === 0 && snap.stdout) {
+        let snapText = snap.stdout;
+        if (snapText.length > MAX_SNAPSHOT_CHARS) {
+          snapText = snapText.slice(0, MAX_SNAPSHOT_CHARS) + '\n...(truncated)';
+        }
+        output += '\n\n--- Page elements (use refs like @e1 to interact) ---\n' + snapText;
+      }
+    } catch { /* ignore snapshot errors */ }
+  }
+
+  // Take screenshot for visual context (sent to LLM as image)
+  const screenshot = await takeScreenshot(cwd);
+  if (screenshot) {
+    emit({ type: 'browser:screenshot', data: screenshot });
+  }
+
+  return { ...basicResult, output, screenshot };
+}
+
+/**
  * Browser tool handler
  */
 async function browserHandler(
@@ -57,7 +126,8 @@ async function browserHandler(
       if (!url) {
         return { success: false, output: 'URL is required for open action' };
       }
-      cliArgs.push('open', url);
+      // Use domcontentloaded instead of load for faster navigation
+      cliArgs.push('open', url, '--wait', 'domcontentloaded');
       
       // Open browser window in UI
       if (!browserWindowId) {
@@ -181,12 +251,60 @@ async function browserHandler(
       break;
     }
 
+    case 'tabs': {
+      // List all open tabs
+      cliArgs.push('tab');
+      break;
+    }
+
+    case 'tab_new': {
+      // Open a new tab, optionally with a URL
+      const url = args.url as string;
+      if (url) {
+        cliArgs.push('tab', 'new', url);
+      } else {
+        cliArgs.push('tab', 'new');
+      }
+      
+      // Ensure browser window is open in UI
+      if (!browserWindowId) {
+        browserWindowId = openWindow('browser', 'Browser');
+      }
+      
+      if (url) {
+        emit({ type: 'browser:navigating', url });
+      }
+      break;
+    }
+
+    case 'tab_close': {
+      // Close a tab by index (0-based), or current tab if no index
+      const index = args.index as number;
+      if (index !== undefined) {
+        cliArgs.push('tab', 'close', String(index));
+      } else {
+        cliArgs.push('tab', 'close');
+      }
+      break;
+    }
+
+    case 'tab_switch': {
+      // Switch to a tab by index (0-based)
+      const index = args.index as number;
+      if (index === undefined) {
+        return { success: false, output: 'Index is required for tab_switch action' };
+      }
+      cliArgs.push('tab', String(index));
+      emit({ type: 'browser:action', action: 'tab_switch', target: String(index) });
+      break;
+    }
+
     default:
       return { success: false, output: `Unknown browser action: ${action}` };
   }
 
   // Add JSON output flag for parsing
-  if (['snapshot', 'get', 'screenshot', 'status'].includes(action)) {
+  if (['snapshot', 'get', 'screenshot', 'status', 'tabs'].includes(action)) {
     cliArgs.push('--json');
   }
 
@@ -204,13 +322,15 @@ async function browserHandler(
     try {
       const data = JSON.parse(result.stdout);
       emit({ type: 'browser:snapshot', snapshot: data.data?.snapshot || '', refs: data.data?.refs || {} });
-      return {
+      const basicResult: ToolResult = {
         success: true,
         output: data.data?.snapshot || result.stdout,
         data,
       };
+      // Enhance snapshot with a screenshot for visual context
+      return enhanceWithVisualContext(basicResult, action, context.workdir);
     } catch {
-      return { success: true, output: result.stdout };
+      return enhanceWithVisualContext({ success: true, output: result.stdout }, action, context.workdir);
     }
   }
 
@@ -223,12 +343,11 @@ async function browserHandler(
     }
   }
 
-  // Handle screenshot
+  // Handle explicit screenshot action
   if (action === 'screenshot' && result.stdout) {
     try {
       const data = JSON.parse(result.stdout);
       if (data.data?.path) {
-        // Read screenshot and emit as base64
         const file = Bun.file(data.data.path);
         const buffer = await file.arrayBuffer();
         const base64 = Buffer.from(buffer).toString('base64');
@@ -239,10 +358,12 @@ async function browserHandler(
     }
   }
 
-  return {
+  // Enhance page-changing actions with auto-snapshot + screenshot
+  const basicResult: ToolResult = {
     success: true,
     output: result.stdout || 'OK',
   };
+  return enhanceWithVisualContext(basicResult, action, context.workdir);
 }
 
 export const browserTool: Tool = {
@@ -252,19 +373,31 @@ export const browserTool: Tool = {
       name: 'browser',
       description: `Control the web browser. Use this to navigate websites, interact with elements, and extract information.
 
-Workflow:
-1. Use 'open' to navigate to a URL
-2. Use 'snapshot' to get the page structure with element refs (e.g., @e1, @e2)
-3. Use 'click', 'fill', 'type' with refs to interact
-4. Use 'screenshot' for visual confirmation
+IMPORTANT: There is only ONE browser instance. To visit multiple websites, use tabs:
+- 'open' navigates the current tab to a new URL
+- 'tab_new' opens a new tab (optionally with a URL)
+- 'tab_switch' switches between tabs
+- 'tabs' lists all open tabs
 
-Refs: After snapshot, elements have refs like @e1, @e2. Use these for interactions.`,
+VISUAL CONTEXT: After page-changing actions (open, click, fill, type, press, scroll, tab_switch, tab_new), you automatically receive:
+1. A page snapshot with element refs (@e1, @e2, etc.) — use these to interact with elements
+2. A screenshot of the page — you can SEE the current state
+
+This means you do NOT need to call 'snapshot' separately after navigation or clicks — refs are already provided.
+
+Workflow:
+1. Use 'open' to navigate to a URL — you'll immediately get the page elements and a screenshot
+2. Use refs (@e1, @e2) from the auto-snapshot to click, fill, type
+3. After each interaction, you get updated refs and a new screenshot
+4. Use 'snapshot' only if you need a fresh snapshot without performing an action
+
+For multiple sites: use 'tab_new' with url, then 'tab_switch' to navigate between them.`,
       parameters: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            enum: ['status', 'open', 'snapshot', 'screenshot', 'click', 'fill', 'type', 'press', 'hover', 'scroll', 'wait', 'get', 'close'],
+            enum: ['status', 'open', 'snapshot', 'screenshot', 'click', 'fill', 'type', 'press', 'hover', 'scroll', 'wait', 'get', 'close', 'tabs', 'tab_new', 'tab_close', 'tab_switch'],
             description: 'The browser action to perform',
           },
           url: {
@@ -324,6 +457,10 @@ Refs: After snapshot, elements have refs like @e1, @e2. Use these for interactio
           ms: {
             type: 'number',
             description: 'Milliseconds to wait',
+          },
+          index: {
+            type: 'number',
+            description: 'Tab index (0-based) for tab_switch or tab_close actions',
           },
         },
         required: ['action'],

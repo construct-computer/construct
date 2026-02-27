@@ -42,8 +42,10 @@ export const browserStateCache = new Map<string, CachedBrowserState>()
 
 /** Map agent tool names to frontend window types */
 export function toolToWindowType(tool: string): DesktopWindowType | null {
-  if (tool.startsWith('browser_')) return 'browser'
+  // Handle both MCP-style (browser_*) and boneclaw-style (browser) tool names
+  if (tool === 'browser' || tool.startsWith('browser_')) return 'browser'
   if (tool === 'exec') return 'terminal'
+  if (tool === 'read' || tool === 'write' || tool === 'edit' || tool === 'list') return 'editor'
   if (tool === 'file_read' || tool === 'file_write' || tool === 'file_edit') return 'editor'
   return null
 }

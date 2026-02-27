@@ -15,6 +15,8 @@ export interface ToolResult {
   success: boolean;
   output: string;
   data?: unknown;
+  /** Base64-encoded screenshot (PNG) for visual context — injected into LLM as image */
+  screenshot?: string;
 }
 
 /**

@@ -18,7 +18,7 @@ interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
-      theme: 'light',
+      theme: 'dark',
       soundEnabled: true,
       
       setTheme: (theme) => {
@@ -50,9 +50,11 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: STORAGE_KEYS.theme,
       onRehydrateStorage: () => (state) => {
-        // Apply theme on hydration
-        if (state?.theme === 'dark') {
+        // Apply theme on hydration — dark is default
+        if (!state || state.theme === 'dark') {
           document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
         }
       },
     }

@@ -5,10 +5,100 @@ import { browserWS, terminalWS, agentWS, type AgentEvent } from '@/services/webs
 import type { AgentWithConfig, WindowType } from '@/types';
 import { useWindowStore } from './windowStore';
 
+export type ChatMessageRole = 'user' | 'agent' | 'activity';
+
+export interface ChatMessage {
+  role: ChatMessageRole;
+  content: string;
+  timestamp: Date;
+  /** For activity messages: which tool triggered it */
+  tool?: string;
+  /** For activity messages: icon hint for rendering */
+  activityType?: 'browser' | 'terminal' | 'file' | 'desktop' | 'tool';
+}
+
+/** Build a human-readable activity description from a tool_call event */
+function describeToolCall(tool: string, params?: Record<string, unknown>): { text: string; activityType: ChatMessage['activityType'] } {
+  const p = params || {};
+
+  // Browser tools
+  if (tool === 'browser' || tool.startsWith('browser_')) {
+    const action = (p.action as string) || tool.replace('browser_', '');
+    const url = p.url as string | undefined;
+    const text = p.text as string | undefined;
+    const selector = p.selector as string | undefined;
+    const ref = p.ref as string | undefined;
+
+    switch (action) {
+      case 'navigate':
+      case 'browser_navigate':
+        return { text: `Navigating to ${url || 'page'}`, activityType: 'browser' };
+      case 'click':
+      case 'browser_click':
+        return { text: `Clicking ${text ? `"${text}"` : selector || ref || 'element'}`, activityType: 'browser' };
+      case 'type':
+      case 'browser_type':
+        return { text: `Typing "${(p.text as string || '').slice(0, 50)}${(p.text as string || '').length > 50 ? '...' : ''}"`, activityType: 'browser' };
+      case 'scroll':
+      case 'browser_scroll':
+        return { text: `Scrolling ${(p.direction as string) || 'page'}`, activityType: 'browser' };
+      case 'snapshot':
+      case 'browser_snapshot':
+        return { text: 'Reading page content', activityType: 'browser' };
+      case 'screenshot':
+      case 'browser_screenshot':
+        return { text: 'Taking screenshot', activityType: 'browser' };
+      case 'tab_new':
+      case 'browser_tab_new':
+        return { text: `Opening new tab${url ? `: ${url}` : ''}`, activityType: 'browser' };
+      case 'tab_close':
+      case 'browser_tab_close':
+        return { text: 'Closing tab', activityType: 'browser' };
+      case 'tab_switch':
+      case 'browser_tab_switch':
+        return { text: `Switching to tab ${p.tabId || ''}`, activityType: 'browser' };
+      default:
+        return { text: `Browser: ${action}`, activityType: 'browser' };
+    }
+  }
+
+  // Terminal / exec
+  if (tool === 'exec') {
+    const cmd = (p.command as string) || '';
+    const display = cmd.length > 80 ? cmd.slice(0, 80) + '...' : cmd;
+    return { text: `Running \`${display}\``, activityType: 'terminal' };
+  }
+
+  // File tools
+  if (tool === 'read' || tool === 'file_read') {
+    return { text: `Reading ${p.path || p.file || 'file'}`, activityType: 'file' };
+  }
+  if (tool === 'write' || tool === 'file_write') {
+    return { text: `Writing ${p.path || p.file || 'file'}`, activityType: 'file' };
+  }
+  if (tool === 'edit' || tool === 'file_edit') {
+    return { text: `Editing ${p.path || p.file || 'file'}`, activityType: 'file' };
+  }
+  if (tool === 'list') {
+    return { text: `Listing ${p.path || p.directory || '.'}`, activityType: 'file' };
+  }
+
+  // Desktop tool
+  if (tool === 'desktop') {
+    const action = p.action as string | undefined;
+    return { text: `Desktop: ${action || 'action'}`, activityType: 'desktop' };
+  }
+
+  // Generic fallback
+  return { text: `Using ${tool}`, activityType: 'tool' };
+}
+
 // Map tool names to the window type they correspond to
 function toolToWindowType(tool: string): WindowType | null {
-  if (tool.startsWith('browser_')) return 'browser';
+  // Handle both MCP-style (browser_*) and boneclaw-style (browser) tool names
+  if (tool === 'browser' || tool.startsWith('browser_')) return 'browser';
   if (tool === 'exec') return 'terminal';
+  if (tool === 'read' || tool === 'write' || tool === 'edit' || tool === 'list') return 'editor';
   if (tool === 'file_read' || tool === 'file_write' || tool === 'file_edit') return 'editor';
   return null;
 }
@@ -62,7 +152,7 @@ interface ComputerStore {
   // Real-time state for the computer
   browserState: BrowserState;
   terminalState: TerminalState;
-  chatMessages: Array<{ role: 'user' | 'agent'; content: string; timestamp: Date }>;
+  chatMessages: ChatMessage[];
   agentThinking: string | null;
   agentConnected: boolean;
   agentActivity: Set<WindowType>; // which apps the agent is actively using
@@ -241,9 +331,10 @@ export const useComputerStore = create<ComputerStore>()(
       
       console.log('[Store] Subscribing to computer', instanceId);
       
-      // Connect all WebSocket services
+      // Connect browser + agent WebSockets.
+      // Terminal WS is NOT connected here — TerminalWindow owns its lifecycle
+      // to ensure xterm receives the initial bash prompt.
       browserWS.connect(instanceId);
-      terminalWS.connect(instanceId);
       agentWS.connect(instanceId);
       
       // Fetch desktop state via REST as a fallback sync.
@@ -254,9 +345,9 @@ export const useComputerStore = create<ComputerStore>()(
           const { windows, browser } = result.data;
           console.log('[Store] REST desktop sync:', windows);
           
-          // Open windows the agent has previously opened
-          for (const winType of windows) {
-            useWindowStore.getState().ensureWindowOpen(winType as WindowType);
+          // Open restored windows in a tidy grid layout
+          if (windows.length > 0) {
+            useWindowStore.getState().openWindowsGrid(windows as WindowType[]);
           }
           
           // Restore cached browser state
@@ -324,16 +415,6 @@ export const useComputerStore = create<ComputerStore>()(
       
       browserWS.onConnection((connected) => {
         set({ browserState: { ...get().browserState, connected } });
-      });
-      
-      terminalWS.onOutput((data) => {
-        const { terminalState } = get();
-        set({
-          terminalState: {
-            ...terminalState,
-            output: [...terminalState.output, data],
-          },
-        });
       });
       
       terminalWS.onConnection((connected) => {
@@ -488,7 +569,26 @@ export const useComputerStore = create<ComputerStore>()(
         
         case 'tool_call': {
           const tool = event.data?.tool as string || event.data?.name as string || 'tool';
-          set({ agentThinking: `Using ${tool}...` });
+          const params = (event.data?.params ?? event.data?.args ?? event.data?.input) as Record<string, unknown> | undefined;
+          
+          // Build descriptive activity message
+          const { text: activityText, activityType } = describeToolCall(tool, params);
+          set({ agentThinking: activityText + '...' });
+          
+          // Add activity log to chat
+          const { chatMessages: msgs } = get();
+          set({
+            chatMessages: [
+              ...msgs,
+              {
+                role: 'activity' as const,
+                content: activityText,
+                timestamp: new Date(),
+                tool,
+                activityType,
+              },
+            ],
+          });
           
           // Auto-open/focus the relevant window
           const windowType = toolToWindowType(tool);
@@ -501,7 +601,6 @@ export const useComputerStore = create<ComputerStore>()(
           
           // Special case: desktop tool with action param
           if (tool === 'desktop') {
-            const params = (event.data?.params ?? event.data?.args) as Record<string, unknown> | undefined;
             const action = params?.action as string | undefined;
             if (action) {
               const actionType = desktopActionToWindowType(action);
@@ -533,6 +632,29 @@ export const useComputerStore = create<ComputerStore>()(
           } else {
             set({ agentThinking: null });
           }
+          
+          // Extract screenshot from browser tool results as fallback frame
+          if (tool.startsWith('browser_')) {
+            const result = event.data?.result as Record<string, unknown> | undefined;
+            const screenshot = (result?.screenshot ?? event.data?.screenshot) as string | undefined;
+            if (screenshot) {
+              get().setBrowserFrame(screenshot);
+            }
+            // Update URL/title from navigation results
+            const url = (result?.url ?? event.data?.url) as string | undefined;
+            const title = (result?.title ?? event.data?.title) as string | undefined;
+            if (url || title) {
+              const { browserState } = get();
+              set({
+                browserState: {
+                  ...browserState,
+                  url: url || browserState.url,
+                  title: title || browserState.title,
+                  isLoading: false,
+                },
+              });
+            }
+          }
           break;
         }
         
@@ -548,11 +670,9 @@ export const useComputerStore = create<ComputerStore>()(
           // Initial sync: backend sends the full list of windows that should be open.
           // This fires when the agent WS connects (page load / reconnect).
           const windows = event.data?.windows as string[] | undefined;
-          if (Array.isArray(windows)) {
+          if (Array.isArray(windows) && windows.length > 0) {
             console.log('[Store] Syncing desktop state:', windows);
-            for (const winType of windows) {
-              useWindowStore.getState().ensureWindowOpen(winType as WindowType);
-            }
+            useWindowStore.getState().openWindowsGrid(windows as WindowType[]);
           }
           break;
         }
@@ -572,6 +692,16 @@ export const useComputerStore = create<ComputerStore>()(
             if (url) {
               set({ browserState: { ...get().browserState, url, isLoading: true } });
             }
+          }
+          break;
+        }
+        
+        case 'browser:screenshot': {
+          // Fallback frame source — agent took a screenshot via browser tool.
+          // Use it to update the browser view if the streaming pipeline isn't delivering frames.
+          const base64 = event.data?.data as string || event.data?.screenshot as string;
+          if (base64) {
+            get().setBrowserFrame(base64);
           }
           break;
         }

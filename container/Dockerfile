@@ -1,93 +1,164 @@
-# BoneClaw Runtime Container - Minimal footprint
-# Uses pre-compiled binary, no runtime dependencies
+# Sandbox container image - fully isolated user environment
+FROM node:20-bookworm-slim
 
-# ===========================================
-# Stage 1: Build BoneClaw binary for Linux
-# ===========================================
-FROM oven/bun:1.2-debian AS builder
-
-WORKDIR /build/boneclaw
-COPY boneclaw/package.json boneclaw/bun.lock* ./
-RUN bun install --frozen-lockfile
-
-COPY boneclaw/src ./src
-COPY boneclaw/tsconfig.json ./
-
-# Compile to standalone binary (Bun embeds runtime)
-# Target: linux-x64 for container compatibility
-RUN bun build src/main.ts --compile --target=bun-linux-x64 --outfile /build/boneclaw-bin
-
-# ===========================================
-# Stage 2: Minimal runtime image
-# ===========================================
-FROM debian:bookworm-slim
-
-# Install only essential dependencies
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Chromium and minimal deps
-    chromium \
+    # Chromium runtime dependencies (needed by agent-browser's bundled Chromium)
     fonts-liberation \
+    fonts-noto-color-emoji \
+    fonts-noto-cjk \
+    fonts-dejavu-core \
+    fonts-freefont-ttf \
+    fonts-roboto \
+    fontconfig \
+    libnss3 \
+    libxss1 \
     libasound2 \
-    libatk-bridge2.0-0 \
     libatk1.0-0 \
+    libatk-bridge2.0-0 \
     libcups2 \
     libdrm2 \
     libgbm1 \
     libgtk-3-0 \
     libnspr4 \
-    libnss3 \
     libxcomposite1 \
     libxdamage1 \
-    libxfixes3 \
     libxrandr2 \
-    # Virtual display
+    # Xvfb for non-headless mode (maximum stealth)
     xvfb \
-    # Essential utilities
-    bash \
+    # General tools
     curl \
-    ca-certificates \
-    # Node.js for agent-browser (minimal)
-    nodejs \
-    npm \
+    wget \
+    git \
+    vim \
+    nano \
+    htop \
+    procps \
+    # tmux for shared terminal sessions (agent + frontend use same PTY)
+    tmux \
+    # Python
+    python3 \
+    python3-pip \
+    python3-venv \
+    # Build tools
+    build-essential \
+    # Supervisor to run multiple processes
+    supervisor \
+    # Clean up
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && fc-cache -fv
 
-# Install agent-browser
-RUN npm install -g agent-browser --omit=dev && \
-    agent-browser install && \
-    npm cache clean --force
+# Install agent-browser globally and download its bundled Chromium.
+# Use a shared path so the sandbox user (non-root) can find the browsers.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
+RUN npm install -g agent-browser && agent-browser install && chmod -R o+rx /opt/browsers
 
-# Create agent user with minimal permissions
-RUN useradd -m -s /bin/bash -u 1000 agent && \
-    mkdir -p /home/agent/.boneclaw/memory && \
-    chown -R agent:agent /home/agent
+# agent-browser stream server port (WebSocket screencast)
+ENV AGENT_BROWSER_STREAM_PORT=9224
 
-# Copy the compiled BoneClaw binary (no runtime needed!)
-COPY --from=builder /build/boneclaw-bin /usr/local/bin/boneclaw
+# Timezone — must match the browser context timezoneId for consistency
+ENV TZ=America/New_York
+
+# Create sandbox user (use UID 1001 to avoid conflict with node user)
+RUN useradd -m -s /bin/bash -u 1001 sandbox && \
+    mkdir -p /home/sandbox/workspace && \
+    mkdir -p /home/sandbox/.boneclaw && \
+    chown -R sandbox:sandbox /home/sandbox
+
+# Install global npm packages
+RUN npm install -g typescript ts-node nodemon
+
+# Create browser-server directory and copy files
+WORKDIR /opt/browser-server
+
+# Copy package files first for better caching
+COPY package.json tsconfig.json ./
+RUN npm install
+
+# Copy and build browser server + desktop MCP server
+COPY browser-server.ts desktop-mcp.ts ./
+RUN npm run build
+
+# --- Install boneclaw agent binary ---
+# The binary must be pre-built for linux/amd64 and placed in bin/
+COPY bin/boneclaw /usr/local/bin/boneclaw
 RUN chmod +x /usr/local/bin/boneclaw
 
-# Copy entrypoint
-COPY container/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Copy boneclaw config template
+COPY boneclaw.yaml /etc/boneclaw/config.yaml
 
-WORKDIR /home/agent
+# Create supervisor config to run browser-server + boneclaw
+RUN mkdir -p /var/log/supervisor
+COPY <<EOF /etc/supervisor/conf.d/supervisord.conf
+[unix_http_server]
+file=/var/run/supervisor.sock
 
-# Environment
-ENV HOME=/home/agent \
-    DISPLAY=:99 \
-    AGENT_BROWSER_STREAM_PORT=9223 \
-    CHROMIUM_PATH=/usr/bin/chromium \
-    # Reduce Chromium memory usage
-    CHROME_FLAGS="--disable-dev-shm-usage --no-sandbox --disable-gpu --disable-software-rasterizer"
+[supervisord]
+nodaemon=true
+user=root
+logfile=/var/log/supervisor/supervisord.log
+pidfile=/var/run/supervisord.pid
 
-# Expose ports for streaming
-EXPOSE 9223
+[supervisorctl]
+serverurl=unix:///var/run/supervisor.sock
 
-# Switch to non-root user
-USER agent
+[rpcinterface:supervisor]
+supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 
-# Health check
-HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -sf http://localhost:9223/ || exit 1
+[program:xvfb]
+command=/usr/bin/Xvfb :99 -screen 0 1920x1080x24 -ac -nolisten tcp
+user=root
+autostart=true
+autorestart=true
+priority=5
+stdout_logfile=/var/log/supervisor/xvfb.log
+stderr_logfile=/var/log/supervisor/xvfb-error.log
 
-ENTRYPOINT ["/entrypoint.sh"]
+[program:tmux-session]
+command=/usr/bin/tmux new-session -d -s main -c /home/sandbox/workspace
+user=sandbox
+autostart=true
+autorestart=false
+startsecs=0
+priority=6
+environment=HOME="/home/sandbox",USER="sandbox"
+stdout_logfile=/var/log/supervisor/tmux.log
+stderr_logfile=/var/log/supervisor/tmux-error.log
+
+[program:browser-server]
+command=node /opt/browser-server/dist/browser-server.js
+user=sandbox
+autostart=true
+autorestart=true
+priority=10
+stdout_logfile=/var/log/supervisor/browser-server.log
+stderr_logfile=/var/log/supervisor/browser-server-error.log
+environment=HOME="/home/sandbox",USER="sandbox",DISPLAY=":99",AGENT_BROWSER_STREAM_PORT="9224",PLAYWRIGHT_BROWSERS_PATH="/opt/browsers"
+
+[program:boneclaw]
+command=/usr/local/bin/boneclaw --config /etc/boneclaw/config.yaml
+user=sandbox
+autostart=true
+autorestart=true
+stdout_logfile=/var/log/supervisor/boneclaw.log
+stderr_logfile=/var/log/supervisor/boneclaw-error.log
+environment=HOME="/home/sandbox",USER="sandbox",DISPLAY=":99",AGENT_BROWSER_STREAM_PORT="9224",PLAYWRIGHT_BROWSERS_PATH="/opt/browsers",AGENT_BROWSER_SESSION="default"
+EOF
+
+# Set workspace directory
+WORKDIR /home/sandbox/workspace
+
+# Switch ownership of workspace to sandbox user
+RUN chown -R sandbox:sandbox /home/sandbox
+
+# Set environment
+ENV HOME=/home/sandbox
+ENV USER=sandbox
+ENV SHELL=/bin/bash
+ENV TERM=xterm-256color
+
+# Expose browser server port + boneclaw HTTP transport port
+EXPOSE 9222 9223
+
+# Run supervisor (which starts browser-server + boneclaw)
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

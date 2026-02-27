@@ -3,7 +3,6 @@ import { cors } from '@elysiajs/cors';
 import { config, validateConfig, logConfig } from './config';
 import { initDatabase, closeDatabase } from './db/client';
 import { authRoutes } from './routes/auth';
-import { agentRoutes } from './routes/agents';
 import { instanceRoutes } from './routes/instances';
 import { wsRoutes } from './ws/handler';
 import { 
@@ -75,7 +74,6 @@ const app = new Elysia()
   .group('/api', (app) =>
     app
       .use(authRoutes)
-      .use(agentRoutes)
       .use(instanceRoutes)
   )
   // WebSocket routes

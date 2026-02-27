@@ -115,6 +115,9 @@ export class OpenRouterClient {
     
     let response: Response | null = null;
     
+    const requestBody = JSON.stringify(request);
+    console.error(`[OpenRouter] Request: model=${request.model} messages=${request.messages.length} tools=${request.tools?.length ?? 0} stream=${request.stream}`);
+    
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       response = await fetch(`${this.config.baseUrl}/chat/completions`, {
         method: 'POST',
@@ -124,7 +127,7 @@ export class OpenRouterClient {
           'HTTP-Referer': 'https://construct.computer',
           'X-Title': 'BoneClaw Agent',
         },
-        body: JSON.stringify(request),
+        body: requestBody,
       });
 
       if (response.ok) {
@@ -150,6 +153,7 @@ export class OpenRouterClient {
       }
 
       const error = await response.text();
+      console.error(`[OpenRouter] Error ${response.status}: ${error}`);
       throw new Error(`OpenRouter API error: ${response.status} ${error}`);
     }
 
@@ -189,8 +193,8 @@ export class OpenRouterClient {
 
             const delta = choice.delta;
 
-            // Handle text content
-            if (delta.content) {
+            // Handle text content (streaming deltas are always strings)
+            if (delta.content && typeof delta.content === 'string') {
               yield { type: 'text_delta', content: delta.content };
             }
 

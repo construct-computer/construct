@@ -3,7 +3,7 @@ import { Elysia, t } from 'elysia'
 import { jwt } from '@elysiajs/jwt'
 import { getUser } from '../services/auth.service'
 import { 
-  containerManager, browserClient, agentClient, instances,
+  containerManager, browserClient, agentClient, terminalServer, instances,
   getDesktopWindows, browserStateCache,
   type Instance 
 } from '../services'
@@ -213,7 +213,8 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
     }
 
     try {
-      // Destroy old sessions
+      // Destroy old sessions (terminal, browser, agent)
+      terminalServer.destroyInstance(params.id)
       await browserClient.destroySession(params.id)
       agentClient.destroySession(params.id)
 
@@ -443,10 +444,25 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
         timeout: 5000,
       })
 
-      execFileSync('docker', ['exec', containerName, 'supervisorctl', 'restart', 'boneclaw'], {
-        stdio: 'pipe',
-        timeout: 10000,
-      })
+      // Try restart first; if boneclaw is in FATAL state it will fail, so fall back to stop+start.
+      try {
+        execFileSync('docker', ['exec', containerName, 'supervisorctl', 'restart', 'boneclaw'], {
+          stdio: 'pipe',
+          timeout: 10000,
+        })
+      } catch {
+        // Likely in FATAL state — stop (ignore errors) then start
+        try {
+          execFileSync('docker', ['exec', containerName, 'supervisorctl', 'stop', 'boneclaw'], {
+            stdio: 'pipe',
+            timeout: 5000,
+          })
+        } catch { /* may already be stopped */ }
+        execFileSync('docker', ['exec', containerName, 'supervisorctl', 'start', 'boneclaw'], {
+          stdio: 'pipe',
+          timeout: 10000,
+        })
+      }
 
       await new Promise(resolve => setTimeout(resolve, 2000))
 
@@ -461,14 +477,9 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
   })
 
   // ── Desktop state snapshot ──
-  .get('/api/instances/:id/desktop/state', async ({ jwt, headers, params, set }) => {
-    const token = headers.authorization?.replace('Bearer ', '')
-    if (!token) { set.status = 401; return { error: 'Unauthorized' } }
-    const payload = await jwt.verify(token) as { userId: string } | false
-    if (!payload) { set.status = 401; return { error: 'Invalid token' } }
-
-    const instance = instances.get(params.id)
-    if (!instance || instance.userId !== payload.userId) {
+  .get('/:id/desktop/state', async ({ params, user, set }) => {
+    const instance = checkOwnership(params.id, user!.id)
+    if (!instance) {
       set.status = 404
       return { error: 'Instance not found' }
     }

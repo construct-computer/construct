@@ -12,6 +12,7 @@
   /* Font families */
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --font-sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --font-brand: "Playfair Display", "Georgia", serif;
 
   /* Default (light) — frosted white glass */
   --color-bg: #e0dcd8;
@@ -244,4 +245,31 @@ html.dark ::-webkit-scrollbar-thumb:active {
 .border-retro-strong {
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-button);
+}
+
+/* ═══════════════════════════════════════════════
+   Welcome screen — macOS-style "Hello" animation
+   ═══════════════════════════════════════════════ */
+
+.hello-cursive {
+  font-family: 'Leckerli One', cursive;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@keyframes hello-gradient {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes welcome-glow-pulse {
+  0%   { opacity: 0.4; transform: scale(1); }
+  50%  { opacity: 0.7; transform: scale(1.08); }
+  100% { opacity: 0.4; transform: scale(1); }
+}
+
+@keyframes lockscreen-slide-up {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-100%); }
 }

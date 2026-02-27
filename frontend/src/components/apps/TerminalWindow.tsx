@@ -75,9 +75,16 @@ export function TerminalWindow({ config: _config }: TerminalWindowProps) {
       terminalWS.sendInput(data);
     });
 
+    // Send resize to backend when terminal dimensions change
+    xterm.onResize(({ cols, rows }) => {
+      terminalWS.resize(cols, rows);
+    });
+
     // Resize when the window changes size
     const ro = new ResizeObserver(() => {
-      requestAnimationFrame(() => fit.fit());
+      requestAnimationFrame(() => {
+        fit.fit();
+      });
     });
     ro.observe(containerRef.current);
 
@@ -90,16 +97,22 @@ export function TerminalWindow({ config: _config }: TerminalWindowProps) {
   }, []);
 
   // ── 2. Wire up websocket when running ─────────────────────────
+  // TerminalWindow owns the terminal WS lifecycle. We force-reconnect
+  // every time deps change so xterm's onOutput handler is set BEFORE
+  // the connection opens, guaranteeing we capture the initial prompt.
   useEffect(() => {
     const xterm = xtermRef.current;
     if (!xterm) return;
 
     if (isRunning && instanceId) {
-      // Wire output *before* connecting so we don't miss the prompt
+      // Wire output handler *before* opening the connection
       terminalWS.onOutput((data: string) => {
         xterm.write(data);
       });
 
+      // Force a fresh connection so we always get a new PTY session
+      // with xterm ready to receive the prompt.
+      terminalWS.disconnect();
       terminalWS.connect(instanceId);
     } else {
       xterm.clear();
@@ -108,7 +121,8 @@ export function TerminalWindow({ config: _config }: TerminalWindowProps) {
     }
 
     return () => {
-      // Don't disconnect on unmount — keeps session alive
+      // Disconnect when the terminal window closes or deps change
+      terminalWS.disconnect();
     };
   }, [isRunning, instanceId]);
 

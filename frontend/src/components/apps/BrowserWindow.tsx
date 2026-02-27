@@ -61,8 +61,11 @@ export function BrowserWindow({ config: _config }: BrowserWindowProps) {
   const screenshot = browserState.screenshot;
   const tabs = browserState.tabs;
 
-  // Show the frame - screenshot is a base64 string from the store
-  const frameSrc = screenshot ? `data:image/jpeg;base64,${screenshot}` : null;
+  // Show the frame - screenshot is a base64 string from the store.
+  // Detect format: PNG starts with "iVBOR", JPEG with "/9j/". Default to JPEG (stream format).
+  const frameSrc = screenshot
+    ? `data:image/${screenshot.startsWith('iVBOR') ? 'png' : 'jpeg'};base64,${screenshot}`
+    : null;
 
   const handleSwitchTab = (tabId: string) => {
     switchTab(tabId);
