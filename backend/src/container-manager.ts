@@ -170,6 +170,7 @@ export class ContainerManager extends EventEmitter {
           --memory=1g \
           --cpus=1 \
           --pids-limit=512 \
+          --storage-opt size=20g \
           --security-opt=no-new-privileges \
           -p ${httpPort}:3000 \
           -p ${browserPort}:9222 \

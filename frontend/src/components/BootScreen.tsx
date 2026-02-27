@@ -50,7 +50,7 @@ export function BootScreen({ error, onRetry }: BootScreenProps) {
           C
         </div>
 
-        <h1 className="text-xl mb-1" style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700 }}>construct.<em className="italic">computer</em></h1>
+        <h1 className="text-xl mb-1" style={{ fontFamily: "'Geo', sans-serif", fontWeight: 400, letterSpacing: '0.04em' }}>construct<span className="opacity-40">.</span><em className="italic opacity-60">computer</em></h1>
         <p className="text-sm text-[var(--color-text-muted)] mb-8">
           Setting up your computer
         </p>

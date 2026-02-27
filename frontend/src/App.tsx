@@ -236,12 +236,7 @@ function App() {
 
       {/* Layer 3: Welcome screen (topmost) — always shown when not logged in */}
       {showWelcome && !isAuthenticated && (
-        <div
-          className="fixed inset-0 transition-opacity duration-[600ms] ease-in-out"
-          style={{ zIndex: 99999 }}
-        >
-          <WelcomeScreen onComplete={handleWelcomeComplete} />
-        </div>
+        <WelcomeScreen onComplete={handleWelcomeComplete} />
       )}
 
       {/* Layer 4: Rebooting overlay (above everything) */}

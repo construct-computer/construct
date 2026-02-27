@@ -66,45 +66,66 @@ function collectSystemStats(prevCpu: { usageUsec: number; wallUsec: number }): {
     if (dWall > 0) cpuPercent = Math.min(100, Math.max(0, (dUsage / dWall) * 100))
   }
 
-  // vCPU count from cgroup cpu.max (v2) or cpu.cfs_quota_us (v1)
-  const cpuMax = readCgroupFile('/sys/fs/cgroup/cpu.max')
-  if (cpuMax) {
-    const [max, period] = cpuMax.split(/\s+/)
-    cpuCount = max === 'max' ? countProcCpus() : Math.max(1, Math.round(parseInt(max, 10) / parseInt(period, 10)))
-  } else {
-    const quota = readCgroupFile('/sys/fs/cgroup/cpu/cpu.cfs_quota_us')
-    const period = readCgroupFile('/sys/fs/cgroup/cpu/cpu.cfs_period_us')
-    if (quota && period && parseInt(quota, 10) > 0) {
-      cpuCount = Math.max(1, Math.round(parseInt(quota, 10) / parseInt(period, 10)))
-    } else {
-      cpuCount = countProcCpus()
-    }
-  }
+  // vCPU count — read cgroup CPU quota to reflect container limits (not host CPUs)
+  cpuCount = getCgroupCpuCount()
 
   // ── Memory ───────────────────────────────────────────────────────────────
+  // Read from cgroup to reflect actual container limits (not host memory).
+  // Usage is computed the same way `docker stats` does:
+  //   used = memory.current - inactive_file (from memory.stat)
   let memUsedBytes = 0
   let memTotalBytes = 0
 
   // cgroup v2
-  const memCurrent = readCgroupFile('/sys/fs/cgroup/memory.current')
   const memMax = readCgroupFile('/sys/fs/cgroup/memory.max')
-  if (memCurrent) {
-    memUsedBytes = parseInt(memCurrent, 10)
-    memTotalBytes = (memMax && memMax !== 'max') ? parseInt(memMax, 10) : 0
+  const memCurrent = readCgroupFile('/sys/fs/cgroup/memory.current')
+  if (memMax && memMax !== 'max' && memCurrent) {
+    memTotalBytes = parseInt(memMax, 10)
+    const current = parseInt(memCurrent, 10)
+    // Subtract inactive_file (reclaimable cache) for a fairer "used" value
+    let inactiveFile = 0
+    const memStat = readCgroupFile('/sys/fs/cgroup/memory.stat')
+    if (memStat) {
+      const m = memStat.match(/inactive_file\s+(\d+)/)
+      if (m) inactiveFile = parseInt(m[1], 10)
+    }
+    memUsedBytes = Math.max(0, current - inactiveFile)
   } else {
     // cgroup v1
-    const v1Used = readCgroupFile('/sys/fs/cgroup/memory/memory.usage_in_bytes')
-    const v1Limit = readCgroupFile('/sys/fs/cgroup/memory/memory.limit_in_bytes')
-    if (v1Used) memUsedBytes = parseInt(v1Used, 10)
-    if (v1Limit) memTotalBytes = parseInt(v1Limit, 10)
+    const limitV1 = readCgroupFile('/sys/fs/cgroup/memory/memory.limit_in_bytes')
+    const usageV1 = readCgroupFile('/sys/fs/cgroup/memory/memory.usage_in_bytes')
+    if (limitV1 && usageV1) {
+      const limit = parseInt(limitV1, 10)
+      // cgroup v1 uses a very large number (~2^63) to mean "unlimited"
+      if (limit > 0 && limit < 2 ** 62) {
+        memTotalBytes = limit
+        const usage = parseInt(usageV1, 10)
+        // Subtract inactive_file from v1 stat
+        let inactiveFile = 0
+        const statV1 = readCgroupFile('/sys/fs/cgroup/memory/memory.stat')
+        if (statV1) {
+          const m = statV1.match(/inactive_file\s+(\d+)/)
+          if (m) inactiveFile = parseInt(m[1], 10)
+        }
+        memUsedBytes = Math.max(0, usage - inactiveFile)
+      }
+    }
   }
 
-  // If memTotal looks like "max" (very large), fall back to /proc/meminfo
-  if (memTotalBytes <= 0 || memTotalBytes > 128 * 1024 * 1024 * 1024) {
+  // Fallback to /proc/meminfo if cgroup didn't provide values
+  if (memTotalBytes === 0) {
     try {
       const meminfo = readFileSync('/proc/meminfo', 'utf-8')
-      const m = meminfo.match(/MemTotal:\s+(\d+)\s+kB/)
-      if (m) memTotalBytes = parseInt(m[1], 10) * 1024
+      const val = (key: string): number => {
+        const m = meminfo.match(new RegExp(`${key}:\\s+(\\d+)\\s+kB`))
+        return m ? parseInt(m[1], 10) * 1024 : 0
+      }
+      memTotalBytes = val('MemTotal')
+      const memFree = val('MemFree')
+      const buffers = val('Buffers')
+      const cached = val('Cached') + val('SReclaimable')
+      memUsedBytes = memTotalBytes - memFree - buffers - cached
+      if (memUsedBytes < 0) memUsedBytes = memTotalBytes - memFree
     } catch { /* ignore */ }
   }
 
@@ -129,7 +150,32 @@ function collectSystemStats(prevCpu: { usageUsec: number; wallUsec: number }): {
   }
 }
 
-function countProcCpus(): number {
+/**
+ * Get the number of CPUs allocated to this container via cgroup limits.
+ * Falls back to /proc/cpuinfo (host CPUs) if no cgroup quota is set.
+ */
+function getCgroupCpuCount(): number {
+  // cgroup v2: /sys/fs/cgroup/cpu.max  →  "quota period" e.g. "100000 100000" = 1 CPU
+  const cpuMax = readCgroupFile('/sys/fs/cgroup/cpu.max')
+  if (cpuMax) {
+    const parts = cpuMax.split(/\s+/)
+    if (parts.length >= 2 && parts[0] !== 'max') {
+      const quota = parseInt(parts[0], 10)
+      const period = parseInt(parts[1], 10)
+      if (quota > 0 && period > 0) return Math.max(1, Math.ceil(quota / period))
+    }
+  }
+
+  // cgroup v1: /sys/fs/cgroup/cpu/cpu.cfs_quota_us + cpu.cfs_period_us
+  const quotaV1 = readCgroupFile('/sys/fs/cgroup/cpu/cpu.cfs_quota_us')
+  const periodV1 = readCgroupFile('/sys/fs/cgroup/cpu/cpu.cfs_period_us')
+  if (quotaV1 && periodV1) {
+    const q = parseInt(quotaV1, 10)
+    const p = parseInt(periodV1, 10)
+    if (q > 0 && p > 0) return Math.max(1, Math.ceil(q / p))
+  }
+
+  // No cgroup quota — fall back to host CPU count
   try {
     const cpuinfo = readFileSync('/proc/cpuinfo', 'utf-8')
     return (cpuinfo.match(/^processor/gm) || []).length || 1

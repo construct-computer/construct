@@ -79,8 +79,8 @@ export function LoginScreen({ onSwitchToRegister }: LoginScreenProps) {
         {/* Name */}
         <h1 className="text-xl text-black/90 dark:text-white mb-1
                        drop-shadow-[0_1px_2px_rgba(0,0,0,0.3)]"
-            style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700 }}>
-          construct.<em className="italic">computer</em>
+            style={{ fontFamily: "'Geo', sans-serif", fontWeight: 400, letterSpacing: '0.04em' }}>
+          construct<span className="opacity-40">.</span><em className="italic opacity-60">computer</em>
         </h1>
         <p className="text-sm text-black/50 dark:text-white/50 mb-6
                       drop-shadow-[0_1px_1px_rgba(0,0,0,0.2)]">

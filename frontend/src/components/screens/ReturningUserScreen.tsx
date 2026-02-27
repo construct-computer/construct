@@ -46,9 +46,9 @@ export function ReturningUserScreen({ onUnlock }: ReturningUserScreenProps) {
         {/* Name */}
         <h1
           className="text-xl text-black/90 dark:text-white mb-6"
-          style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, textShadow: '0 1px 3px rgba(0,0,0,0.3)' }}
+          style={{ fontFamily: "'Geo', sans-serif", fontWeight: 400, letterSpacing: '0.04em', textShadow: '0 1px 3px rgba(0,0,0,0.3)' }}
         >
-          construct.<em className="italic">computer</em>
+          construct<span className="opacity-40">.</span><em className="italic opacity-60">computer</em>
         </h1>
 
         {isLocked ? (

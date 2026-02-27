@@ -7,22 +7,28 @@ interface WelcomeScreenProps {
 }
 
 /**
- * macOS-style first-boot welcome screen.
+ * Premium first-boot welcome screen with cinematic transitions.
  *
- * Phase 1: "Hello" in cursive with animated blue gradient — fades in, holds, fades out
- * Phase 2: Logo + "Welcome to construct.computer" + tagline — staggered entrance, holds, fades out
- * Phase 3: Entire overlay dissolves to reveal lock screen
+ * Phase 1: "hello" — cursive greeting with luminous gradient, rises into view
+ * Phase 2: Brand reveal — typographic "construct.computer" with staggered elements
+ * Phase 3: Cinematic exit — content lifts away with depth blur, revealing login beneath
  */
 export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
-  // Phase 1 — Hello
-  const [helloVisible, setHelloVisible] = useState(false);
-  // Phase 2 — Welcome
-  const [showWelcome, setShowWelcome] = useState(false);
-  const [logoVisible, setLogoVisible] = useState(false);
-  const [titleVisible, setTitleVisible] = useState(false);
-  const [taglineVisible, setTaglineVisible] = useState(false);
-  // Phase 3 — Overlay dissolve
-  const [overlayVisible, setOverlayVisible] = useState(true);
+  // Phase 1
+  const [helloIn, setHelloIn] = useState(false);
+  const [helloOut, setHelloOut] = useState(false);
+
+  // Phase 2
+  const [showBrand, setShowBrand] = useState(false);
+  const [lineIn, setLineIn] = useState(false);
+  const [subtitleIn, setSubtitleIn] = useState(false);
+  const [brandIn, setBrandIn] = useState(false);
+  const [taglineIn, setTaglineIn] = useState(false);
+  const [brandOut, setBrandOut] = useState(false);
+
+  // Phase 3
+  const [exiting, setExiting] = useState(false);
+
   // Mount control
   const [showHello, setShowHello] = useState(true);
 
@@ -35,43 +41,47 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
       timers.push(setTimeout(fn, ms));
     };
 
-    // Phase 1: Hello fade in
-    t(() => setHelloVisible(true), 150);
-    // Phase 1: Hello fade out
-    t(() => setHelloVisible(false), 2800);
+    // ── Phase 1: "hello" ───────────────────────────────
+    t(() => setHelloIn(true), 200);       // rise in
+    t(() => setHelloOut(true), 4000);     // drift out (+1s)
+    t(() => {                              // swap to phase 2
+      setShowHello(false);
+      setShowBrand(true);
+    }, 4800);
 
-    // Phase 2: Switch to welcome, stagger elements in
-    t(() => { setShowHello(false); setShowWelcome(true); }, 3700);
-    t(() => setLogoVisible(true), 3850);
-    t(() => setTitleVisible(true), 4100);
-    t(() => setTaglineVisible(true), 4500);
+    // ── Phase 2: Brand reveal ──────────────────────────
+    t(() => setLineIn(true), 4900);       // decorative line draws
+    t(() => setSubtitleIn(true), 5150);   // "Welcome to"
+    t(() => setBrandIn(true), 5400);      // "construct.computer"
+    t(() => setTaglineIn(true), 5850);    // tagline
 
-    // Phase 2: Fade out welcome
-    t(() => {
-      setLogoVisible(false);
-      setTitleVisible(false);
-      setTaglineVisible(false);
-    }, 6600);
+    // Phase 2 exit
+    t(() => setBrandOut(true), 8000);
 
-    // Phase 3: Dissolve overlay
-    t(() => setOverlayVisible(false), 7500);
+    // ── Phase 3: Cinematic exit ────────────────────────
+    t(() => setExiting(true), 8800);
 
-    // Done
-    t(() => onCompleteRef.current(), 8500);
+    // Done — unmount
+    t(() => onCompleteRef.current(), 10000);
 
     return () => timers.forEach(clearTimeout);
   }, []);
+
+  // Shared easing
+  const ease = 'cubic-bezier(0.16, 1, 0.3, 1)'; // expo out
 
   return (
     <div
       className="fixed inset-0 flex items-center justify-center"
       style={{
         zIndex: 99999,
-        opacity: overlayVisible ? 1 : 0,
-        transition: 'opacity 1s ease-in-out',
+        opacity: exiting ? 0 : 1,
+        transform: exiting ? 'scale(1.04)' : 'scale(1)',
+        filter: exiting ? 'blur(6px)' : 'blur(0px)',
+        transition: `opacity 1.2s ${ease}, transform 1.2s ${ease}, filter 1.2s ${ease}`,
       }}
     >
-      {/* Wallpaper — always dark for dramatic effect */}
+      {/* Wallpaper base */}
       <div
         className="absolute inset-0"
         style={{
@@ -81,112 +91,162 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
         }}
       />
 
-      {/* Dark scrim + heavy blur */}
-      <div className="absolute inset-0 backdrop-blur-2xl bg-black/60" />
+      {/* Dark cinematic scrim */}
+      <div className="absolute inset-0 backdrop-blur-3xl bg-black/70" />
 
-      {/* Ambient glow behind content */}
+      {/* Vignette overlay */}
       <div
-        className="absolute rounded-full"
+        className="absolute inset-0 pointer-events-none"
         style={{
-          width: '40vw',
-          height: '40vw',
-          maxWidth: 500,
-          maxHeight: 500,
-          background: 'radial-gradient(circle, rgba(59,130,246,0.12) 0%, transparent 70%)',
-          animation: 'welcome-glow-pulse 4s ease-in-out infinite',
-          pointerEvents: 'none',
+          background: 'radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.5) 100%)',
         }}
       />
 
-      {/* ── Phase 1: "Hello" ── */}
+      {/* Primary ambient glow — soft blue, centered */}
+      <div
+        className="absolute pointer-events-none"
+        style={{
+          width: '50vw',
+          height: '50vw',
+          maxWidth: 600,
+          maxHeight: 600,
+          borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(59,130,246,0.10) 0%, rgba(59,130,246,0.03) 50%, transparent 70%)',
+          animation: 'welcome-glow-pulse 5s ease-in-out infinite',
+        }}
+      />
+
+      {/* Secondary ambient glow — wider, warmer */}
+      <div
+        className="absolute pointer-events-none"
+        style={{
+          width: '80vw',
+          height: '80vw',
+          maxWidth: 900,
+          maxHeight: 900,
+          borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(147,197,253,0.04) 0%, transparent 60%)',
+          animation: 'welcome-glow-pulse 7s ease-in-out infinite reverse',
+        }}
+      />
+
+      {/* ── Phase 1: "hello" ── */}
       {showHello && (
         <h1
           className="hello-cursive select-none relative z-10"
           style={{
-            fontSize: 'clamp(5rem, 14vw, 12rem)',
+            fontSize: 'clamp(5rem, 15vw, 13rem)',
             lineHeight: 1,
-            background: 'linear-gradient(135deg, #93C5FD 0%, #3B82F6 35%, #60A5FA 65%, #BFDBFE 100%)',
-            backgroundSize: '200% 200%',
-            animation: 'hello-gradient 4s ease infinite',
+            letterSpacing: '-0.01em',
+            background: 'linear-gradient(135deg, #60A5FA 0%, #818CF8 12%, #C084FC 24%, #F472B6 36%, #FB7185 48%, #FB923C 60%, #FBBF24 72%, #34D399 84%, #60A5FA 100%)',
+            backgroundSize: '300% 300%',
+            animation: 'hello-gradient 6s linear infinite',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
-            opacity: helloVisible ? 1 : 0,
-            transform: helloVisible ? 'scale(1)' : 'scale(0.92)',
-            filter: helloVisible
-              ? 'blur(0px) drop-shadow(0 4px 30px rgba(59,130,246,0.35))'
-              : 'blur(8px) drop-shadow(0 4px 30px rgba(59,130,246,0))',
-            transition: 'opacity 0.8s ease-out, transform 0.8s ease-out, filter 0.8s ease-out',
+            opacity: helloOut ? 0 : helloIn ? 1 : 0,
+            transform: helloOut
+              ? 'translateY(-24px)'
+              : helloIn
+                ? 'translateY(0)'
+                : 'translateY(28px)',
+            filter: helloOut
+              ? 'blur(6px)'
+              : helloIn
+                ? `blur(0px) drop-shadow(0 0 40px rgba(59,130,246,0.3)) drop-shadow(0 0 80px rgba(59,130,246,0.15))`
+                : 'blur(10px)',
+            transition: helloOut
+              ? `opacity 0.7s ease-in, transform 0.7s ease-in, filter 0.7s ease-in`
+              : `opacity 1s ${ease}, transform 1s ${ease}, filter 1s ${ease}`,
           }}
         >
-          Hello
+          hello
         </h1>
       )}
 
-      {/* ── Phase 2: Logo + Welcome text ── */}
-      {showWelcome && (
-        <div className="flex flex-col items-center select-none relative z-10 px-6">
+      {/* ── Phase 2: Brand reveal ── */}
+      {showBrand && (
+        <div
+          className="flex flex-col items-center select-none relative z-10"
+          style={{
+            opacity: brandOut ? 0 : 1,
+            transform: brandOut ? 'translateY(-12px) scale(0.98)' : 'translateY(0) scale(1)',
+            transition: `opacity 0.8s ease-in, transform 0.8s ease-in`,
+          }}
+        >
           {/* Logo */}
           <div
             style={{
-              opacity: logoVisible ? 1 : 0,
-              transform: logoVisible ? 'scale(1) translateY(0)' : 'scale(0.8) translateY(10px)',
-              transition: 'opacity 0.7s ease-out, transform 0.7s ease-out',
+              opacity: lineIn ? 1 : 0,
+              transform: lineIn ? 'scale(1)' : 'scale(0.85)',
+              transition: `opacity 0.7s ${ease}, transform 0.7s ${ease}`,
+              marginBottom: 32,
             }}
           >
             <img
               src={logoImg}
-              alt="construct.computer"
-              className="rounded-2xl"
+              alt=""
               style={{
-                width: 72,
-                height: 72,
-                boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 0 60px rgba(59,130,246,0.15)',
+                width: 64,
+                height: 64,
+                borderRadius: 16,
+                boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.06)',
               }}
             />
           </div>
 
-          {/* Title group */}
-          <div
-            className="text-center mt-7"
+          {/* "Welcome to" */}
+          <p
             style={{
-              opacity: titleVisible ? 1 : 0,
-              transform: titleVisible ? 'translateY(0)' : 'translateY(16px)',
-              transition: 'opacity 0.7s ease-out, transform 0.7s ease-out',
+              fontFamily: 'var(--font-sans)',
+              fontSize: 12,
+              fontWeight: 500,
+              textTransform: 'uppercase',
+              letterSpacing: '0.25em',
+              color: 'rgba(255,255,255,0.4)',
+              marginBottom: 14,
+              opacity: subtitleIn ? 1 : 0,
+              transform: subtitleIn ? 'translateY(0)' : 'translateY(12px)',
+              transition: `opacity 0.6s ${ease}, transform 0.6s ${ease}`,
             }}
           >
-            <p
-              className="text-[15px] font-light tracking-widest uppercase mb-2"
-              style={{
-                color: 'rgba(255,255,255,0.4)',
-                letterSpacing: '0.2em',
-                textShadow: '0 1px 2px rgba(0,0,0,0.3)',
-              }}
-            >
-              Welcome to
-            </p>
-            <h1
-              className="text-4xl sm:text-5xl tracking-tight"
-              style={{
-                fontFamily: "'Playfair Display', serif",
-                fontWeight: 700,
-                color: 'white',
-                filter: 'drop-shadow(0 2px 10px rgba(0,0,0,0.3))',
-              }}
-            >
-              construct.<em style={{ fontStyle: 'italic' }}>computer</em>
-            </h1>
-          </div>
+            Welcome to
+          </p>
+
+          {/* Brand name — Geo: geometric, angular, techy */}
+          <h1
+            style={{
+              fontFamily: "'Geo', sans-serif",
+              fontSize: 'clamp(2.2rem, 6vw, 3.8rem)',
+              lineHeight: 1.15,
+              fontWeight: 400,
+              letterSpacing: '0.04em',
+              color: 'white',
+              opacity: brandIn ? 1 : 0,
+              transform: brandIn ? 'translateY(0)' : 'translateY(16px)',
+              filter: brandIn
+                ? 'drop-shadow(0 1px 8px rgba(0,0,0,0.25))'
+                : 'drop-shadow(0 1px 8px rgba(0,0,0,0))',
+              transition: `opacity 0.7s ${ease}, transform 0.7s ${ease}, filter 0.7s ${ease}`,
+            }}
+          >
+            construct
+            <span style={{ color: 'rgba(96,165,250,0.5)' }}>.</span>
+            <span style={{ fontStyle: 'italic', color: 'rgba(96,165,250,0.85)' }}>computer</span>
+          </h1>
 
           {/* Tagline */}
           <p
-            className="text-sm font-light mt-5 tracking-wide"
             style={{
-              color: 'rgba(255,255,255,0.3)',
-              opacity: taglineVisible ? 1 : 0,
-              transform: taglineVisible ? 'translateY(0)' : 'translateY(8px)',
-              transition: 'opacity 0.6s ease-out, transform 0.6s ease-out',
-              textShadow: '0 1px 1px rgba(0,0,0,0.2)',
+              fontFamily: 'var(--font-sans)',
+              fontSize: 13,
+              fontWeight: 400,
+              letterSpacing: '0.02em',
+              color: 'rgba(255,255,255,0.25)',
+              marginTop: 16,
+              opacity: taglineIn ? 1 : 0,
+              transform: taglineIn ? 'translateY(0)' : 'translateY(8px)',
+              transition: `opacity 0.6s ${ease}, transform 0.6s ${ease}`,
             }}
           >
             Your AI-powered cloud workspace
