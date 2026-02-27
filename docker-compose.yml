@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - DB_PATH=/data/construct.db
+      - JWT_SECRET=${JWT_SECRET:-construct-computer-jwt-secret-change-in-production}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-construct-computer-default-key-32b}
+      - CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+    volumes:
+      - backend-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - docker-proxy
+    restart: unless-stopped
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - CONTAINERS=1
+      - IMAGES=1
+      - NETWORKS=1
+      - VOLUMES=1
+      - EXEC=1
+      - POST=1
+    restart: unless-stopped
+
+volumes:
+  backend-data:
+
+# Note: Agent containers are created dynamically by the backend
+# Each user gets their own boneclaw-runtime container with:
+# - Isolated filesystem
+# - Persistent data volume
+# - Exposed ports for browser/terminal streaming

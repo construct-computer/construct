@@ -1,0 +1,22 @@
+{
+  "name": "boneclaw",
+  "version": "0.1.0",
+  "description": "Lightweight AI agent framework for construct.computer",
+  "type": "module",
+  "main": "src/main.ts",
+  "bin": {
+    "boneclaw": "./dist/boneclaw"
+  },
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "build": "bun build src/main.ts --compile --outfile dist/boneclaw",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.0.0"
+  }
+}

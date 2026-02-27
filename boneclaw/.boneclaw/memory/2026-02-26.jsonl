@@ -1,0 +1,13 @@
+{"timestamp":1772130424349,"role":"user","content":"Say hello and tell me what tools you have available. Be brief."}
+{"timestamp":1772130431461,"role":"user","content":"Say hello and tell me what tools you have available. Be brief."}
+{"timestamp":1772130447891,"role":"user","content":"Say hello and list the tools you have. Be brief."}
+{"timestamp":1772130495239,"role":"user","content":"Say hello. Be brief."}
+{"timestamp":1772130578628,"role":"user","content":"Say hello briefly."}
+{"timestamp":1772130590940,"role":"user","content":"Say hello and list 2 tools you have. Be brief."}
+{"timestamp":1772130670666,"role":"user","content":"Say hello and list 2 tools you have. Be very brief."}
+{"timestamp":1772130676419,"role":"assistant","content":"Hello! Browser and exec tools available.\n"}
+{"timestamp":1772130682245,"role":"user","content":"List the files in the current directory using the list tool."}
+{"timestamp":1772130685668,"role":"tool","content":"d node_modules/\n- bun.lock\n- package.json\nd .boneclaw/\n- tsconfig.json\nd src/","tool_call_id":"u2eJMMxyB"}
+{"timestamp":1772130705023,"role":"assistant","content":"```\nd node_modules/\n- bun.lock\n- package.json\nd .boneclaw/\n- tsconfig.json\nd src/\n```\n"}
+{"timestamp":1772132893647,"role":"user","content":"Say hello in one word."}
+{"timestamp":1772132897417,"role":"assistant","content":"Hello\n"}

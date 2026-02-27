@@ -1,0 +1,247 @@
+@import "tailwindcss";
+
+/* Enable class-based dark mode (TailwindCSS v4 defaults to media query) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ============================================
+   CONSTRUCT.COMPUTER - Glass Desktop OS Theme
+   Semi-transparent surfaces over backdrop-blur
+   ============================================ */
+
+@theme {
+  /* Font families */
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+
+  /* Default (light) — frosted white glass */
+  --color-bg: #e0dcd8;
+  --color-surface: rgba(255, 255, 255, 0.35);
+  --color-surface-raised: rgba(255, 255, 255, 0.45);
+  --color-border: rgba(0, 0, 0, 0.12);
+  --color-border-strong: rgba(0, 0, 0, 0.20);
+  --color-text: #111111;
+  --color-text-muted: rgba(0, 0, 0, 0.55);
+  --color-text-subtle: rgba(0, 0, 0, 0.35);
+  --color-accent: #3B82F6;
+  --color-accent-hover: #2563EB;
+  --color-accent-muted: rgba(59, 130, 246, 0.10);
+  --color-error: #DC2626;
+  --color-error-muted: rgba(220, 38, 38, 0.10);
+  --color-success: #16A34A;
+  --color-success-muted: rgba(22, 163, 74, 0.10);
+  --color-warning: #CA8A04;
+  --color-warning-muted: rgba(202, 138, 4, 0.10);
+  --color-titlebar: rgba(0, 0, 0, 0.03);
+  --color-titlebar-inactive: rgba(0, 0, 0, 0.01);
+  --color-taskbar: rgba(255, 255, 255, 0.15);
+  --color-selection: #3B82F6;
+
+  /* Window control dots - Mac style (vivid) */
+  --color-dot-close: #FE5B5F;
+  --color-dot-minimize: #FAC800;
+  --color-dot-maximize: #34C748;
+
+  /* Spacing */
+  --spacing-window-padding: 2px;
+  --spacing-titlebar-height: 28px;
+  --spacing-taskbar-height: 44px;
+
+  /* Border radius */
+  --radius-window: 6px;
+  --radius-button: 4px;
+  --radius-input: 4px;
+
+  /* Shadows */
+  --shadow-window: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
+  --shadow-window-focus: 0 8px 24px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.06);
+  --shadow-menu: 0 4px 16px rgba(0, 0, 0, 0.10);
+
+  /* Z-index layers */
+  --z-desktop: 0;
+  --z-window-base: 100;
+  --z-window-focused: 200;
+  --z-taskbar: 900;
+  --z-menu: 950;
+  --z-modal: 1000;
+  --z-tooltip: 1100;
+}
+
+/* Dark theme — glass on dark wallpaper */
+html.dark {
+  --color-bg: #1a1817;
+  --color-surface: rgba(255, 255, 255, 0.04);
+  --color-surface-raised: rgba(255, 255, 255, 0.08);
+  --color-border: rgba(255, 255, 255, 0.10);
+  --color-border-strong: rgba(255, 255, 255, 0.18);
+  --color-text: #E8E4E0;
+  --color-text-muted: rgba(255, 255, 255, 0.5);
+  --color-text-subtle: rgba(255, 255, 255, 0.3);
+  --color-accent: #60A5FA;
+  --color-accent-hover: #93C5FD;
+  --color-accent-muted: rgba(96, 165, 250, 0.12);
+  --color-error: #F87171;
+  --color-error-muted: rgba(248, 113, 113, 0.12);
+  --color-success: #4ADE80;
+  --color-success-muted: rgba(74, 222, 128, 0.12);
+  --color-warning: #FACC15;
+  --color-warning-muted: rgba(250, 204, 21, 0.12);
+  --color-titlebar: rgba(255, 255, 255, 0.03);
+  --color-titlebar-inactive: rgba(255, 255, 255, 0.01);
+  --color-taskbar: rgba(0, 0, 0, 0.2);
+  --color-selection: #60A5FA;
+
+  --color-dot-close: #FE5B5F;
+  --color-dot-minimize: #FAC800;
+  --color-dot-maximize: #34C748;
+
+  --shadow-window: 0 4px 12px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.15);
+  --shadow-window-focus: 0 8px 24px rgba(0, 0, 0, 0.4), 0 4px 8px rgba(0, 0, 0, 0.2);
+  --shadow-menu: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+/* Base styles */
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.4;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Monospace for code/terminal */
+code, pre, .font-mono {
+  font-family: var(--font-mono);
+}
+
+/* Selection */
+::selection {
+  background-color: var(--color-selection);
+  color: white;
+}
+
+/* ═══════════════════════════════════════════════
+   Custom scrollbars — macOS-style auto-reveal
+   Thin pill-shaped thumb, auto-hides when idle
+   ═══════════════════════════════════════════════ */
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
+}
+
+html.dark * {
+  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+
+/* Webkit (Chrome, Safari, Edge) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Default — nearly invisible */
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.25s ease;
+}
+
+/* Reveal when container is hovered */
+:hover::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Highlight when thumb itself is hovered */
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.30);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Dragging the thumb */
+::-webkit-scrollbar-thumb:active {
+  background: rgba(0, 0, 0, 0.40);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Dark mode */
+html.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.04);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+html.dark :hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+html.dark ::-webkit-scrollbar-thumb:active {
+  background: rgba(255, 255, 255, 0.35);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Focus visible for accessibility */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* Disable text selection on UI elements */
+.select-none {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Window content scrollable area */
+.window-content {
+  overflow: auto;
+  flex: 1;
+}
+
+/* Glass-compatible utility borders */
+.border-retro {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+}
+
+.border-retro-strong {
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-button);
+}
