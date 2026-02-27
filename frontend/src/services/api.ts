@@ -227,6 +227,70 @@ export async function getDesktopState(instanceId: string): Promise<ApiResult<Des
   return request(`/instances/${instanceId}/desktop/state`);
 }
 
+// ============================================================================
+// Filesystem API
+// ============================================================================
+
+export interface FileEntry {
+  name: string;
+  type: 'file' | 'directory' | 'symlink';
+  size: number;
+  modified: string;
+}
+
+export interface FileListResponse {
+  path: string;
+  entries: FileEntry[];
+}
+
+export async function listFiles(instanceId: string, path = '/home/sandbox/workspace'): Promise<ApiResult<FileListResponse>> {
+  return request(`/instances/${instanceId}/files?path=${encodeURIComponent(path)}`);
+}
+
+export interface FileContentResponse {
+  path: string;
+  content: string;
+}
+
+export async function readFile(instanceId: string, path: string): Promise<ApiResult<FileContentResponse>> {
+  return request(`/instances/${instanceId}/files/read?path=${encodeURIComponent(path)}`);
+}
+
+export async function writeFile(instanceId: string, path: string, content: string): Promise<ApiResult<{ status: string; path: string }>> {
+  return request(`/instances/${instanceId}/files/write`, {
+    method: 'PUT',
+    body: JSON.stringify({ path, content }),
+  });
+}
+
+export async function createFile(instanceId: string, path: string): Promise<ApiResult<{ status: string; path: string }>> {
+  return request(`/instances/${instanceId}/files/create`, {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  });
+}
+
+export async function createDirectory(instanceId: string, path: string): Promise<ApiResult<{ status: string; path: string }>> {
+  return request(`/instances/${instanceId}/files/mkdir`, {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  });
+}
+
+export async function deleteItem(instanceId: string, path: string): Promise<ApiResult<{ status: string; path: string }>> {
+  return request(`/instances/${instanceId}/files/delete`, {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  });
+}
+
+export async function renameItem(instanceId: string, oldPath: string, newPath: string): Promise<ApiResult<{ status: string; oldPath: string; newPath: string }>> {
+  return request(`/instances/${instanceId}/files/rename`, {
+    method: 'POST',
+    body: JSON.stringify({ oldPath, newPath }),
+  });
+}
+
 // Legacy function for compatibility
 export async function getComputer(): Promise<ApiResult<{ computer: AgentWithConfig }>> {
   // Map instance to legacy "computer" format

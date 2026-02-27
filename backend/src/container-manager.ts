@@ -324,6 +324,23 @@ export class ContainerManager extends EventEmitter {
     })
   }
 
+  async listDirectory(instanceId: string, dirPath: string): Promise<Array<{ name: string; type: 'file' | 'directory' | 'symlink'; size: number; modified: string }>> {
+    const containerName = `${CONTAINER_PREFIX}${instanceId}`
+    const script = [
+      `const fs=require('fs'),path=require('path'),dir=process.argv[1];`,
+      `try{const items=fs.readdirSync(dir).map(name=>{try{`,
+      `const s=fs.lstatSync(path.join(dir,name));`,
+      `const type=s.isSymbolicLink()?'symlink':s.isDirectory()?'directory':'file';`,
+      `return{name,type,size:s.size,modified:s.mtime.toISOString()}}catch{return null}}).filter(Boolean);`,
+      `process.stdout.write(JSON.stringify(items))}catch(e){process.stderr.write(e.message);process.exit(1)}`,
+    ].join('')
+    const output = execFileSync('docker', ['exec', containerName, 'node', '-e', script, dirPath], {
+      encoding: 'utf-8',
+      timeout: 10000,
+    })
+    return JSON.parse(output.trim())
+  }
+
   async writeFile(instanceId: string, filePath: string, content: string): Promise<void> {
     const containerName = `${CONTAINER_PREFIX}${instanceId}`
     // Pipe content via stdin to avoid shell injection
@@ -331,6 +348,38 @@ export class ContainerManager extends EventEmitter {
     execFileSync('docker', ['exec', '-i', containerName, 'tee', filePath], {
       input: buf,
       stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  }
+
+  async createFile(instanceId: string, filePath: string): Promise<void> {
+    const containerName = `${CONTAINER_PREFIX}${instanceId}`
+    execFileSync('docker', ['exec', containerName, 'touch', filePath], {
+      stdio: 'pipe',
+      timeout: 10000,
+    })
+  }
+
+  async createDirectory(instanceId: string, dirPath: string): Promise<void> {
+    const containerName = `${CONTAINER_PREFIX}${instanceId}`
+    execFileSync('docker', ['exec', containerName, 'mkdir', '-p', dirPath], {
+      stdio: 'pipe',
+      timeout: 10000,
+    })
+  }
+
+  async deleteItem(instanceId: string, itemPath: string): Promise<void> {
+    const containerName = `${CONTAINER_PREFIX}${instanceId}`
+    execFileSync('docker', ['exec', containerName, 'rm', '-rf', itemPath], {
+      stdio: 'pipe',
+      timeout: 10000,
+    })
+  }
+
+  async renameItem(instanceId: string, oldPath: string, newPath: string): Promise<void> {
+    const containerName = `${CONTAINER_PREFIX}${instanceId}`
+    execFileSync('docker', ['exec', containerName, 'mv', oldPath, newPath], {
+      stdio: 'pipe',
+      timeout: 10000,
     })
   }
 

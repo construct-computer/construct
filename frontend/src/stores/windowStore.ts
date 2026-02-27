@@ -170,6 +170,10 @@ function computeGridLayout(
   const cellW = Math.floor((availW - gap * (cols - 1)) / cols);
   const cellH = Math.floor((availH - gap * (rows - 1)) / rows);
 
+  // Cap window sizes at half the screen dimensions
+  const halfW = Math.floor(screenWidth / 2);
+  const halfH = Math.floor(screenHeight / 2);
+
   return types.map((type, i) => {
     const col = i % cols;
     const row = Math.floor(i / cols);
@@ -178,16 +182,17 @@ function computeGridLayout(
     const minW = defaults.minWidth ?? MIN_WINDOW_WIDTH;
     const minH = defaults.minHeight ?? MIN_WINDOW_HEIGHT;
 
-    // Use the cell size but respect min constraints
-    const w = Math.max(minW, cellW);
-    const h = Math.max(minH, cellH);
+    // Use the cell size but clamp between min and half-screen
+    const w = clamp(cellW, minW, halfW);
+    const h = clamp(cellH, minH, halfH);
 
-    return {
-      x: padding + col * (cellW + gap),
-      y: padding + row * (cellH + gap),
-      width: w,
-      height: h,
-    };
+    // Center window within its grid cell when capped
+    const cellX = padding + col * (cellW + gap);
+    const cellY = padding + row * (cellH + gap);
+    const x = cellX + Math.max(0, Math.floor((cellW - w) / 2));
+    const y = cellY + Math.max(0, Math.floor((cellH - h) / 2));
+
+    return { x, y, width: w, height: h };
   });
 }
 
@@ -243,6 +248,7 @@ export const useWindowStore = create<WindowStore>()(
         state: 'normal',
         zIndex: nextZIndex,
         agentId: options.agentId,
+        metadata: options.metadata,
       };
       
       set({

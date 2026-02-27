@@ -48,6 +48,9 @@ export interface WindowConfig {
   // Optional agent association
   agentId?: string;
   
+  // Arbitrary per-window data (e.g. filePath for editor windows)
+  metadata?: Record<string, unknown>;
+  
   // For restoring from maximized/minimized
   previousBounds?: WindowBounds;
 }

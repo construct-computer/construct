@@ -489,3 +489,193 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
       browser: browserStateCache.get(params.id) ?? null,
     }
   })
+
+  // ── Filesystem ──
+  .get('/:id/files', async ({ params, query, user, set }) => {
+    const instance = checkOwnership(params.id, user!.id)
+    if (!instance) {
+      set.status = 404
+      return { error: 'Instance not found' }
+    }
+
+    const container = containerManager.getContainer(params.id)
+    if (!container) {
+      set.status = 404
+      return { error: 'Container not found' }
+    }
+
+    const q = query as Record<string, string | undefined>
+    const dirPath = q.path || '/home/sandbox/workspace'
+
+    try {
+      const entries = await containerManager.listDirectory(params.id, dirPath)
+      return { path: dirPath, entries }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set.status = 500
+      return { error: `Failed to list directory: ${msg}` }
+    }
+  })
+
+  .get('/:id/files/read', async ({ params, query, user, set }) => {
+    const instance = checkOwnership(params.id, user!.id)
+    if (!instance) {
+      set.status = 404
+      return { error: 'Instance not found' }
+    }
+
+    const container = containerManager.getContainer(params.id)
+    if (!container) {
+      set.status = 404
+      return { error: 'Container not found' }
+    }
+
+    const q = query as Record<string, string | undefined>
+    const filePath = q.path
+    if (!filePath) {
+      set.status = 400
+      return { error: 'path query parameter is required' }
+    }
+
+    try {
+      const content = await containerManager.readFile(params.id, filePath)
+      return { path: filePath, content }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set.status = 500
+      return { error: `Failed to read file: ${msg}` }
+    }
+  })
+
+  .put('/:id/files/write', async ({ params, body, user, set }) => {
+    const instance = checkOwnership(params.id, user!.id)
+    if (!instance) {
+      set.status = 404
+      return { error: 'Instance not found' }
+    }
+
+    const container = containerManager.getContainer(params.id)
+    if (!container) {
+      set.status = 404
+      return { error: 'Container not found' }
+    }
+
+    const { path: filePath, content } = body as { path?: string; content?: string }
+    if (!filePath || content === undefined) {
+      set.status = 400
+      return { error: 'path and content are required' }
+    }
+
+    try {
+      await containerManager.writeFile(params.id, filePath, content)
+      return { status: 'ok', path: filePath }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set.status = 500
+      return { error: `Failed to write file: ${msg}` }
+    }
+  })
+
+  .post('/:id/files/create', async ({ params, body, user, set }) => {
+    const instance = checkOwnership(params.id, user!.id)
+    if (!instance) {
+      set.status = 404
+      return { error: 'Instance not found' }
+    }
+    const container = containerManager.getContainer(params.id)
+    if (!container) {
+      set.status = 404
+      return { error: 'Container not found' }
+    }
+    const { path: filePath } = body as { path?: string }
+    if (!filePath) {
+      set.status = 400
+      return { error: 'path is required' }
+    }
+    try {
+      await containerManager.createFile(params.id, filePath)
+      return { status: 'ok', path: filePath }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set.status = 500
+      return { error: `Failed to create file: ${msg}` }
+    }
+  })
+
+  .post('/:id/files/mkdir', async ({ params, body, user, set }) => {
+    const instance = checkOwnership(params.id, user!.id)
+    if (!instance) {
+      set.status = 404
+      return { error: 'Instance not found' }
+    }
+    const container = containerManager.getContainer(params.id)
+    if (!container) {
+      set.status = 404
+      return { error: 'Container not found' }
+    }
+    const { path: dirPath } = body as { path?: string }
+    if (!dirPath) {
+      set.status = 400
+      return { error: 'path is required' }
+    }
+    try {
+      await containerManager.createDirectory(params.id, dirPath)
+      return { status: 'ok', path: dirPath }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set.status = 500
+      return { error: `Failed to create directory: ${msg}` }
+    }
+  })
+
+  .post('/:id/files/delete', async ({ params, body, user, set }) => {
+    const instance = checkOwnership(params.id, user!.id)
+    if (!instance) {
+      set.status = 404
+      return { error: 'Instance not found' }
+    }
+    const container = containerManager.getContainer(params.id)
+    if (!container) {
+      set.status = 404
+      return { error: 'Container not found' }
+    }
+    const { path: itemPath } = body as { path?: string }
+    if (!itemPath) {
+      set.status = 400
+      return { error: 'path is required' }
+    }
+    try {
+      await containerManager.deleteItem(params.id, itemPath)
+      return { status: 'ok', path: itemPath }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set.status = 500
+      return { error: `Failed to delete: ${msg}` }
+    }
+  })
+
+  .post('/:id/files/rename', async ({ params, body, user, set }) => {
+    const instance = checkOwnership(params.id, user!.id)
+    if (!instance) {
+      set.status = 404
+      return { error: 'Instance not found' }
+    }
+    const container = containerManager.getContainer(params.id)
+    if (!container) {
+      set.status = 404
+      return { error: 'Container not found' }
+    }
+    const { oldPath, newPath } = body as { oldPath?: string; newPath?: string }
+    if (!oldPath || !newPath) {
+      set.status = 400
+      return { error: 'oldPath and newPath are required' }
+    }
+    try {
+      await containerManager.renameItem(params.id, oldPath, newPath)
+      return { status: 'ok', oldPath, newPath }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set.status = 500
+      return { error: `Failed to rename: ${msg}` }
+    }
+  })
