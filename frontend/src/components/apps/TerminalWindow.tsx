@@ -114,6 +114,26 @@ export function TerminalWindow({ config: _config }: TerminalWindowProps) {
       // with xterm ready to receive the prompt.
       terminalWS.disconnect();
       terminalWS.connect(instanceId);
+
+      // After connect, force resize sends so tmux gets SIGWINCH and
+      // redraws. xterm.js already fitted before the WS opened, so
+      // onResize won't fire automatically — we must push dimensions
+      // explicitly. Two delays cover slow container connections.
+      const timers = [500, 1500].map((ms) =>
+        setTimeout(() => {
+          const fit = fitRef.current;
+          const term = xtermRef.current;
+          if (fit && term) {
+            fit.fit();
+            terminalWS.resize(term.cols, term.rows);
+          }
+        }, ms)
+      );
+
+      return () => {
+        timers.forEach(clearTimeout);
+        terminalWS.disconnect();
+      };
     } else {
       xterm.clear();
       xterm.writeln('\x1b[33mNot connected\x1b[0m');
