@@ -175,6 +175,7 @@ export class BrowserClient {
       case 'tabs':
       case 'status':
       case 'activeTab':
+      case 'stats':
       case 'ack':
       case 'error':
         // Forward these messages to all registered client callbacks

@@ -122,6 +122,15 @@ export interface BrowserTab {
   active: boolean;
 }
 
+export interface SystemStats {
+  cpuPercent: number;
+  cpuCount: number;
+  memUsedBytes: number;
+  memTotalBytes: number;
+  diskUsedBytes: number;
+  diskTotalBytes: number;
+}
+
 interface BrowserState {
   url: string;
   title: string;
@@ -156,6 +165,7 @@ interface ComputerStore {
   agentThinking: string | null;
   agentConnected: boolean;
   agentActivity: Set<WindowType>; // which apps the agent is actively using
+  systemStats: SystemStats | null;
   
   // Actions
   fetchComputer: () => Promise<void>;
@@ -210,6 +220,7 @@ export const useComputerStore = create<ComputerStore>()(
     agentThinking: null,
     agentConnected: false,
     agentActivity: new Set<WindowType>(),
+    systemStats: null,
     
     fetchComputer: async () => {
       const { computer: existing } = get();
@@ -380,7 +391,18 @@ export const useComputerStore = create<ComputerStore>()(
       
       browserWS.onMessage((msg) => {
         const { browserState } = get();
-        if (msg.type === 'status') {
+        if (msg.type === 'stats') {
+          set({
+            systemStats: {
+              cpuPercent: (msg.cpuPercent as number) || 0,
+              cpuCount: (msg.cpuCount as number) || 1,
+              memUsedBytes: (msg.memUsedBytes as number) || 0,
+              memTotalBytes: (msg.memTotalBytes as number) || 0,
+              diskUsedBytes: (msg.diskUsedBytes as number) || 0,
+              diskTotalBytes: (msg.diskTotalBytes as number) || 0,
+            },
+          });
+        } else if (msg.type === 'status') {
           set({
             browserState: {
               ...browserState,
@@ -441,6 +463,7 @@ export const useComputerStore = create<ComputerStore>()(
         terminalState: { output: [], cwd: '~', connected: false },
         agentConnected: false,
         agentActivity: new Set<WindowType>(),
+        systemStats: null,
       });
     },
     

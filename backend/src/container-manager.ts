@@ -167,7 +167,7 @@ export class ContainerManager extends EventEmitter {
         `docker run -d \
           --name ${containerName} \
           --hostname sandbox \
-          --memory=512m \
+          --memory=1g \
           --cpus=1 \
           --pids-limit=512 \
           --security-opt=no-new-privileges \

@@ -13,11 +13,128 @@
 import { WebSocketServer, WebSocket } from 'ws'
 import { createServer } from 'http'
 import { execSync, spawn, type ChildProcess } from 'child_process'
+import { readFileSync, existsSync } from 'fs'
 import WebSocketClient from 'ws'
 
 const PORT = 9222
 const AGENT_BROWSER_STREAM_PORT = 9224 // internal streaming port
 const VIEWPORT = { width: 1280, height: 720 }
+
+// ─── System stats helpers ───────────────────────────────────────────────────
+
+interface SystemStats {
+  cpuPercent: number   // 0–100 of allocated CPU
+  cpuCount: number     // vCPUs allocated to container
+  memUsedBytes: number
+  memTotalBytes: number
+  diskUsedBytes: number
+  diskTotalBytes: number
+}
+
+/**
+ * Read a single-value cgroup file, returning its trimmed content or null.
+ */
+function readCgroupFile(path: string): string | null {
+  try { return readFileSync(path, 'utf-8').trim() } catch { return null }
+}
+
+/**
+ * Collect system stats from cgroup v2 (preferred) or v1 fallback.
+ * `prevCpu` is the previous {usageUsec, wallUsec} for delta-based CPU%.
+ */
+function collectSystemStats(prevCpu: { usageUsec: number; wallUsec: number }): { stats: SystemStats; cpu: { usageUsec: number; wallUsec: number } } {
+  let cpuPercent = 0
+  let cpuCount = 1
+  let usageUsec = 0
+  const wallUsec = Date.now() * 1000
+
+  // ── CPU ──────────────────────────────────────────────────────────────────
+  // cgroup v2: /sys/fs/cgroup/cpu.stat  →  usage_usec <n>
+  const cpuStat = readCgroupFile('/sys/fs/cgroup/cpu.stat')
+  if (cpuStat) {
+    const m = cpuStat.match(/usage_usec\s+(\d+)/)
+    if (m) usageUsec = parseInt(m[1], 10)
+  } else {
+    // cgroup v1 fallback: /sys/fs/cgroup/cpuacct/cpuacct.usage  (nanoseconds)
+    const v1 = readCgroupFile('/sys/fs/cgroup/cpuacct/cpuacct.usage')
+    if (v1) usageUsec = Math.floor(parseInt(v1, 10) / 1000)
+  }
+
+  if (prevCpu.wallUsec > 0) {
+    const dUsage = usageUsec - prevCpu.usageUsec
+    const dWall = wallUsec - prevCpu.wallUsec
+    if (dWall > 0) cpuPercent = Math.min(100, Math.max(0, (dUsage / dWall) * 100))
+  }
+
+  // vCPU count from cgroup cpu.max (v2) or cpu.cfs_quota_us (v1)
+  const cpuMax = readCgroupFile('/sys/fs/cgroup/cpu.max')
+  if (cpuMax) {
+    const [max, period] = cpuMax.split(/\s+/)
+    cpuCount = max === 'max' ? countProcCpus() : Math.max(1, Math.round(parseInt(max, 10) / parseInt(period, 10)))
+  } else {
+    const quota = readCgroupFile('/sys/fs/cgroup/cpu/cpu.cfs_quota_us')
+    const period = readCgroupFile('/sys/fs/cgroup/cpu/cpu.cfs_period_us')
+    if (quota && period && parseInt(quota, 10) > 0) {
+      cpuCount = Math.max(1, Math.round(parseInt(quota, 10) / parseInt(period, 10)))
+    } else {
+      cpuCount = countProcCpus()
+    }
+  }
+
+  // ── Memory ───────────────────────────────────────────────────────────────
+  let memUsedBytes = 0
+  let memTotalBytes = 0
+
+  // cgroup v2
+  const memCurrent = readCgroupFile('/sys/fs/cgroup/memory.current')
+  const memMax = readCgroupFile('/sys/fs/cgroup/memory.max')
+  if (memCurrent) {
+    memUsedBytes = parseInt(memCurrent, 10)
+    memTotalBytes = (memMax && memMax !== 'max') ? parseInt(memMax, 10) : 0
+  } else {
+    // cgroup v1
+    const v1Used = readCgroupFile('/sys/fs/cgroup/memory/memory.usage_in_bytes')
+    const v1Limit = readCgroupFile('/sys/fs/cgroup/memory/memory.limit_in_bytes')
+    if (v1Used) memUsedBytes = parseInt(v1Used, 10)
+    if (v1Limit) memTotalBytes = parseInt(v1Limit, 10)
+  }
+
+  // If memTotal looks like "max" (very large), fall back to /proc/meminfo
+  if (memTotalBytes <= 0 || memTotalBytes > 128 * 1024 * 1024 * 1024) {
+    try {
+      const meminfo = readFileSync('/proc/meminfo', 'utf-8')
+      const m = meminfo.match(/MemTotal:\s+(\d+)\s+kB/)
+      if (m) memTotalBytes = parseInt(m[1], 10) * 1024
+    } catch { /* ignore */ }
+  }
+
+  // ── Disk ─────────────────────────────────────────────────────────────────
+  let diskUsedBytes = 0
+  let diskTotalBytes = 0
+  try {
+    const df = execSync("df / --output=used,size -B1 2>/dev/null | tail -1", {
+      encoding: 'utf-8',
+      timeout: 3000,
+    }).trim()
+    const parts = df.split(/\s+/)
+    if (parts.length >= 2) {
+      diskUsedBytes = parseInt(parts[0], 10)
+      diskTotalBytes = parseInt(parts[1], 10)
+    }
+  } catch { /* ignore */ }
+
+  return {
+    stats: { cpuPercent, cpuCount, memUsedBytes, memTotalBytes, diskUsedBytes, diskTotalBytes },
+    cpu: { usageUsec, wallUsec },
+  }
+}
+
+function countProcCpus(): number {
+  try {
+    const cpuinfo = readFileSync('/proc/cpuinfo', 'utf-8')
+    return (cpuinfo.match(/^processor/gm) || []).length || 1
+  } catch { return 1 }
+}
 
 /** Strip ANSI escape codes from terminal output */
 function stripAnsi(str: string): string {
@@ -128,6 +245,12 @@ class BrowserServer {
   private streamReconnectTimer: NodeJS.Timeout | null = null
   private isLaunched = false
   private tabPollInterval: NodeJS.Timeout | null = null
+  private isRecovering = false
+  private consecutiveCrashes = 0
+  private static readonly MAX_CRASH_RETRIES = 3
+  private static readonly CRASH_COOLDOWN_MS = 5_000
+  private prevCpu = { usageUsec: 0, wallUsec: 0 }
+  private lastStats: SystemStats | null = null
 
   async start() {
     console.log('[BrowserServer] Starting with agent-browser backend...')
@@ -140,6 +263,9 @@ class BrowserServer {
       if (req.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ status: 'ok' }))
+      } else if (req.url === '/stats') {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
+        res.end(JSON.stringify(this.lastStats || {}))
       } else {
         res.writeHead(404)
         res.end()
@@ -152,9 +278,12 @@ class BrowserServer {
       console.log('[BrowserServer] Client connected')
       this.clients.add(ws)
 
-      // Send initial frame + tabs immediately so the frontend isn't blank
+      // Send initial frame + tabs + stats immediately so the frontend isn't blank
       this.sendFrameToClient(ws).catch(() => {})
       this.pollTabs().catch(() => {})
+      if (this.lastStats) {
+        ws.send(JSON.stringify({ type: 'stats', ...this.lastStats }))
+      }
 
       ws.on('message', async (data) => {
         try {
@@ -180,6 +309,48 @@ class BrowserServer {
 
     // Poll for tab updates periodically
     this.tabPollInterval = setInterval(() => this.pollTabs(), 2000)
+
+    // Periodic health check: detect silently-crashed browser
+    setInterval(() => this.healthCheck(), 30_000)
+
+    // Broadcast system stats every 5 seconds
+    // Seed the first CPU reading so the next tick has a delta
+    const seed = collectSystemStats(this.prevCpu)
+    this.prevCpu = seed.cpu
+    this.lastStats = seed.stats
+    setInterval(() => this.broadcastStats(), 5_000)
+  }
+
+  /**
+   * Periodic health check — verify the browser is still responsive.
+   * If it isn't, trigger automatic recovery.
+   */
+  private async healthCheck() {
+    if (this.isRecovering || !this.isLaunched) return
+    try {
+      // A simple `get url` should succeed quickly if the browser is alive
+      await agentBrowser(['get', 'url'], 10_000)
+    } catch (e) {
+      if (this.isCrashError(e)) {
+        console.warn('[BrowserServer] Health check failed — browser appears crashed')
+        await this.recoverBrowser()
+      }
+    }
+  }
+
+  private broadcastStats() {
+    const { stats, cpu } = collectSystemStats(this.prevCpu)
+    this.prevCpu = cpu
+    this.lastStats = stats
+
+    if (this.clients.size === 0) return
+
+    const msg = JSON.stringify({ type: 'stats', ...stats })
+    for (const client of this.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(msg)
+      }
+    }
   }
 
   private async launchBrowser() {
@@ -228,6 +399,102 @@ class BrowserServer {
       console.log('[BrowserServer] agent-browser launched successfully')
     } catch (e) {
       console.error('[BrowserServer] Failed to launch agent-browser:', e)
+      throw e
+    }
+  }
+
+  /**
+   * Detect if an error indicates a browser crash (OOM, renderer killed, etc.)
+   */
+  private isCrashError(error: unknown): boolean {
+    const msg = String(error)
+    return msg.includes('Page crashed') ||
+      msg.includes('Target crashed') ||
+      msg.includes('Session closed') ||
+      msg.includes('browser has been closed') ||
+      msg.includes('Browser closed') ||
+      msg.includes('Connection refused')
+  }
+
+  /**
+   * Recover from a browser crash by killing stale processes and re-launching.
+   * Uses a mutex (isRecovering) to prevent concurrent recovery attempts.
+   */
+  private async recoverBrowser(): Promise<boolean> {
+    if (this.isRecovering) return false
+    this.isRecovering = true
+
+    console.warn('[BrowserServer] Browser crash detected — starting recovery...')
+
+    // Notify all clients that recovery is in progress
+    const recoveryMsg = JSON.stringify({
+      type: 'status',
+      url: '',
+      title: 'Browser recovering...',
+      recovering: true,
+    })
+    for (const client of this.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(recoveryMsg)
+      }
+    }
+
+    try {
+      // 1. Kill all stale Chrome and agent-browser processes
+      try {
+        execSync('pkill -f chrome 2>/dev/null || true', { stdio: 'pipe', timeout: 5000 })
+      } catch { /* ignore */ }
+      try {
+        execSync('pkill -f agent-browser 2>/dev/null || true', { stdio: 'pipe', timeout: 5000 })
+      } catch { /* ignore */ }
+
+      // Wait for processes to terminate
+      await new Promise(r => setTimeout(r, 2000))
+
+      // 2. Clean up stale agent-browser sockets/pids
+      try {
+        execSync('rm -f /home/sandbox/.agent-browser/*.sock /home/sandbox/.agent-browser/*.pid /home/sandbox/.agent-browser/*.stream 2>/dev/null', { stdio: 'pipe' })
+      } catch { /* ignore */ }
+
+      // 3. Re-launch the browser
+      this.isLaunched = false
+      await this.launchBrowser()
+
+      // 4. Reconnect to the stream
+      this.connectToStream()
+
+      // 5. Send a fresh frame + tabs to all clients
+      await new Promise(r => setTimeout(r, 1000))
+      await this.broadcastFrame()
+      await this.broadcastTabs()
+
+      this.consecutiveCrashes = 0
+      console.log('[BrowserServer] Browser recovery successful')
+      return true
+    } catch (e) {
+      console.error('[BrowserServer] Browser recovery failed:', e)
+      this.consecutiveCrashes++
+      return false
+    } finally {
+      this.isRecovering = false
+    }
+  }
+
+  /**
+   * Wrapper that runs an action and triggers recovery on crash errors.
+   * Returns the action result, or re-throws if recovery also fails.
+   */
+  private async withCrashRecovery<T>(action: () => Promise<T>): Promise<T> {
+    try {
+      return await action()
+    } catch (e) {
+      if (this.isCrashError(e) && this.consecutiveCrashes < BrowserServer.MAX_CRASH_RETRIES) {
+        const recovered = await this.recoverBrowser()
+        if (recovered) {
+          // Retry the action once after recovery
+          return await action()
+        }
+      }
       throw e
     }
   }
@@ -677,6 +944,17 @@ class BrowserServer {
       }
     } catch (e) {
       console.error(`[BrowserServer] Action ${action} failed:`, e)
+
+      // If this looks like a crash, attempt recovery
+      if (this.isCrashError(e) && !this.isRecovering) {
+        ws.send(JSON.stringify({ type: 'error', action, message: 'Browser crashed — recovering...', recovering: true }))
+        const recovered = await this.recoverBrowser()
+        if (recovered) {
+          ws.send(JSON.stringify({ type: 'ack', action, recovered: true }))
+          return
+        }
+      }
+
       ws.send(JSON.stringify({ type: 'error', action, message: (e as Error).message }))
     }
   }

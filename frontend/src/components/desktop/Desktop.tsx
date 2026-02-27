@@ -2,11 +2,12 @@ import { useEffect, useRef } from 'react';
 import { Wallpaper } from './Wallpaper';
 import { MenuBar } from './MenuBar';
 import { Dock } from './Dock';
+import { SystemStatsWidget } from './SystemStatsWidget';
 import { WindowManager } from '@/components/window';
 import { useWindowStore } from '@/stores/windowStore';
 import { useComputerStore } from '@/stores/agentStore';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
-import { MENUBAR_HEIGHT, DOCK_HEIGHT } from '@/lib/constants';
+import { MENUBAR_HEIGHT, DOCK_HEIGHT, Z_INDEX } from '@/lib/constants';
 
 interface DesktopProps {
   onLogout?: () => void;
@@ -67,6 +68,14 @@ export function Desktop({ onLogout, onLockScreen, onRestart, isConnected }: Desk
         style={{ top: MENUBAR_HEIGHT }}
       >
         <WindowManager />
+      </div>
+
+      {/* Desktop widgets layer — above wallpaper, below windows */}
+      <div
+        className="absolute right-3 pointer-events-none"
+        style={{ top: MENUBAR_HEIGHT + 12, zIndex: Z_INDEX.desktopIcon }}
+      >
+        <SystemStatsWidget />
       </div>
 
       {/* Dock (bottom) */}
