@@ -29,17 +29,20 @@ export interface MemorySummary {
   created: Date;
 }
 
-const DEFAULT_MEMORY: MemoryData = {
-  shortTerm: [],
-  longTerm: {
-    facts: [],
-    skills: [],
-    relationships: [],
-  },
-  taskState: {},
-  lastActivity: Date.now(),
-  created: Date.now(),
-};
+/** Factory — returns a fresh default MemoryData each call (no shared references). */
+function createDefaultMemory(): MemoryData {
+  return {
+    shortTerm: [],
+    longTerm: {
+      facts: [],
+      skills: [],
+      relationships: [],
+    },
+    taskState: {},
+    lastActivity: Date.now(),
+    created: Date.now(),
+  };
+}
 
 export class Memory {
   private data: MemoryData;
@@ -62,13 +65,13 @@ export class Memory {
     if (existsSync(memoryFile)) {
       try {
         const content = readFileSync(memoryFile, 'utf-8');
-        return { ...DEFAULT_MEMORY, ...JSON.parse(content) };
+        return { ...createDefaultMemory(), ...JSON.parse(content) };
       } catch {
-        return { ...DEFAULT_MEMORY };
+        return createDefaultMemory();
       }
     }
     
-    return { ...DEFAULT_MEMORY };
+    return createDefaultMemory();
   }
 
   /**
@@ -265,7 +268,7 @@ export class Memory {
    * Clear all memory
    */
   clear(): void {
-    this.data = { ...DEFAULT_MEMORY, created: this.data.created };
+    this.data = { ...createDefaultMemory(), created: this.data.created };
     this.dirty = true;
   }
 

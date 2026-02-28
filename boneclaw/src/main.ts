@@ -94,10 +94,15 @@ async function runInteractiveMode(config: ReturnType<typeof loadConfig>): Promis
     port,
     agentLoop,
     memory: agentLoop.getMemory(),
+    sessions: agentLoop.getSessionManager(),
     startTime,
     config: {
       model: config.openrouter.model,
       provider: 'openrouter',
+    },
+    openrouter: {
+      apiKey: config.openrouter.apiKey,
+      baseUrl: config.openrouter.baseUrl,
     },
   });
   

@@ -66,6 +66,9 @@ build_docker() {
         build_boneclaw
     fi
     
+    # Pull base images before building so network errors surface early
+    pull_base_images
+    
     cd "$PROJECT_ROOT/container"
     
     echo "  Building container (this may take a few minutes)..."

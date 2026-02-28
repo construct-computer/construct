@@ -81,3 +81,56 @@ export function createSoundPlayer(enabled: boolean) {
     }
   };
 }
+
+/**
+ * Install a global click-sound listener via event delegation.
+ * Plays the "click" sound for any interactive element (button, link, input, etc.).
+ * Uses a short cooldown so components that already call play('click') don't double-fire.
+ *
+ * @param isEnabled — function that returns whether sounds are currently enabled
+ * @returns cleanup function to remove the listener
+ */
+export function installGlobalClickSound(isEnabled: () => boolean): () => void {
+  let lastPlayedAt = 0;
+  const COOLDOWN_MS = 60; // ignore rapid duplicate plays
+
+  /** Check whether an element (or an ancestor) is interactive / clickable. */
+  function isInteractive(el: HTMLElement | null): boolean {
+    while (el) {
+      const tag = el.tagName;
+      if (
+        tag === 'BUTTON' ||
+        tag === 'A' ||
+        tag === 'SELECT' ||
+        tag === 'SUMMARY' ||
+        el.getAttribute('role') === 'button' ||
+        el.getAttribute('role') === 'menuitem' ||
+        el.getAttribute('role') === 'tab' ||
+        el.getAttribute('role') === 'option' ||
+        (tag === 'INPUT' && ['checkbox', 'radio', 'submit', 'reset', 'button'].includes(
+          (el as HTMLInputElement).type,
+        ))
+      ) {
+        return true;
+      }
+      // Stop at common boundaries so we don't walk the entire DOM
+      if (tag === 'BODY' || tag === 'HTML') break;
+      el = el.parentElement;
+    }
+    return false;
+  }
+
+  function handler(e: MouseEvent) {
+    if (!isEnabled()) return;
+    if (!isInteractive(e.target as HTMLElement)) return;
+
+    const now = performance.now();
+    if (now - lastPlayedAt < COOLDOWN_MS) return;
+    lastPlayedAt = now;
+
+    playSound('click');
+  }
+
+  document.addEventListener('click', handler, { capture: true });
+  return () => document.removeEventListener('click', handler, { capture: true });
+}

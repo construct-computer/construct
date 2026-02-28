@@ -3,6 +3,7 @@ import type { ToolDefinition, ParsedToolCall } from '../llm/types';
 import { browserTool } from './browser';
 import { execTool } from './exec';
 import { readTool, writeTool, editTool, listTool } from './filesystem';
+import { notifyTool } from './notify';
 import { emitToolStart, emitToolEnd } from '../events/emitter';
 
 /**
@@ -38,6 +39,7 @@ registry.register(readTool);
 registry.register(writeTool);
 registry.register(editTool);
 registry.register(listTool);
+registry.register(notifyTool);
 
 /**
  * Execute a tool call

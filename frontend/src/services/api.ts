@@ -208,9 +208,71 @@ export async function getAgentConfigStatus(instanceId: string): Promise<ApiResul
  */
 export async function getAgentHistory(instanceId: string, sessionKey = 'ws_default'): Promise<ApiResult<{
   session_key: string;
-  messages: Array<{ role: string; content: string | null }>;
+  messages: Array<{
+    role: string;
+    content: string | null;
+    tool_calls?: Array<{
+      type: string;
+      function: { name: string; arguments: string };
+    }>;
+  }>;
 }>> {
   return request(`/instances/${instanceId}/agent/history?session_key=${encodeURIComponent(sessionKey)}`);
+}
+
+export interface SessionInfo {
+  key: string;
+  title: string;
+  created: number;
+  lastActivity: number;
+}
+
+/**
+ * List all chat sessions for the agent.
+ */
+export async function getAgentSessions(instanceId: string): Promise<ApiResult<{
+  sessions: SessionInfo[];
+  active_key: string;
+}>> {
+  return request(`/instances/${instanceId}/agent/sessions`);
+}
+
+/**
+ * Create a new chat session.
+ */
+export async function createAgentSession(instanceId: string, title?: string): Promise<ApiResult<SessionInfo>> {
+  return request(`/instances/${instanceId}/agent/sessions`, {
+    method: 'POST',
+    body: JSON.stringify({ title }),
+  });
+}
+
+/**
+ * Delete a chat session.
+ */
+export async function deleteAgentSession(instanceId: string, sessionKey: string): Promise<ApiResult<{ ok: boolean; active_key: string }>> {
+  return request(`/instances/${instanceId}/agent/sessions/${encodeURIComponent(sessionKey)}`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * Rename a chat session.
+ */
+export async function renameAgentSession(instanceId: string, sessionKey: string, title: string): Promise<ApiResult<{ ok: boolean }>> {
+  return request(`/instances/${instanceId}/agent/sessions/${encodeURIComponent(sessionKey)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ title }),
+  });
+}
+
+/**
+ * Switch the active chat session.
+ */
+export async function activateAgentSession(instanceId: string, sessionKey: string): Promise<ApiResult<{ ok: boolean; active_key: string }>> {
+  return request(`/instances/${instanceId}/agent/sessions/${encodeURIComponent(sessionKey)}/activate`, {
+    method: 'PUT',
+  });
 }
 
 /**

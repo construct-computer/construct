@@ -321,6 +321,20 @@ class AgentWSClient {
     }
   }
 
+  /** Abort the agent's currently running loop. */
+  sendAbort() {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'abort' }));
+    }
+  }
+
+  /** Notify the backend that the user closed a window so it stops being restored on refresh. */
+  sendWindowClose(windowType: string) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'window_close', windowType }));
+    }
+  }
+
   onEvent(handler: (event: AgentEvent) => void) {
     this.eventHandler = handler;
   }

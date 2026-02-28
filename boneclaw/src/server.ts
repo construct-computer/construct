@@ -4,6 +4,7 @@
  * - GET /status - Agent status
  * - GET /history - Conversation history
  * - POST /chat - Send a message to the agent
+ * - POST /notify - Send a desktop notification (used by notify-send shim)
  * - WS /events - Stream agent events in real-time
  */
 
@@ -11,6 +12,7 @@ import type { ServerWebSocket } from 'bun';
 import type { AgentEvent } from './events/types';
 import type { AgentLoop } from './agent/loop';
 import type { Memory } from './memory';
+import type { SessionManager } from './memory/sessions';
 
 // WebSocket clients subscribed to events
 const eventClients = new Set<ServerWebSocket<unknown>>();
@@ -96,26 +98,35 @@ export function broadcastEvent(event: AgentEvent): void {
   }
 }
 
+/** Model used for cheap background tasks (title generation). Free tier. */
+const TITLE_MODEL = 'nvidia/nemotron-3-nano-30b-a3b:free';
+
 interface ServerOptions {
   port: number;
   agentLoop: AgentLoop;
   memory: Memory;
+  sessions: SessionManager;
   startTime: number;
   config: {
     model: string;
     provider: string;
+  };
+  /** Needed for background LLM calls (auto-title generation). */
+  openrouter: {
+    apiKey: string;
+    baseUrl: string;
   };
 }
 
 let serverInstance: ReturnType<typeof Bun.serve> | null = null;
 
 export function startServer(options: ServerOptions): ReturnType<typeof Bun.serve> {
-  const { port, agentLoop, memory, startTime, config } = options;
+  const { port, agentLoop, sessions, startTime, config, openrouter } = options;
 
   serverInstance = Bun.serve({
     port,
     
-    fetch(req, server) {
+    async fetch(req, server) {
       const url = new URL(req.url);
       
       // Handle WebSocket upgrade for /events
@@ -130,7 +141,7 @@ export function startServer(options: ServerOptions): ReturnType<typeof Bun.serve
       // CORS headers for all responses
       const corsHeaders = {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type',
       };
       
@@ -151,22 +162,116 @@ export function startServer(options: ServerOptions): ReturnType<typeof Bun.serve
         }, { headers: corsHeaders });
       }
       
-      // GET /history - Conversation history
+      // GET /history - Conversation history (session-aware)
       if (url.pathname === '/history' && req.method === 'GET') {
-        const sessionKey = url.searchParams.get('session_key') || 'default';
-        const messages = memory.getRecentContext();
+        const sessionKey = url.searchParams.get('session_key') || sessions.getActiveKey();
+        const mem = agentLoop.getMemory(sessionKey);
         return Response.json({
           session_key: sessionKey,
-          messages: messages.map(m => ({
+          messages: mem.getRecentContext().map(m => ({
             role: m.role,
             content: m.content,
+            // Include tool_calls so the frontend can reconstruct activity logs
+            ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
           })),
         }, { headers: corsHeaders });
       }
       
-      // POST /chat - Send message to agent
+      // POST /chat - Send message to agent (session-aware)
       if (url.pathname === '/chat' && req.method === 'POST') {
-        return handleChat(req, agentLoop, corsHeaders);
+        return handleChat(req, agentLoop, sessions, openrouter, corsHeaders);
+      }
+      
+      // POST /abort - Stop the currently running agent loop
+      if (url.pathname === '/abort' && req.method === 'POST') {
+        const aborted = agentLoop.abort();
+        return Response.json({ aborted }, { headers: corsHeaders });
+      }
+      
+      // POST /notify - Send a desktop notification (used by notify-send shim)
+      if (url.pathname === '/notify' && req.method === 'POST') {
+        try {
+          const body = await req.json() as { title?: string; body?: string; variant?: string };
+          const title = body.title || 'Notification';
+          const nBody = body.body || undefined;
+          const variant = body.variant || 'info';
+          
+          broadcastEvent({
+            type: 'notification',
+            title,
+            body: nBody,
+            variant,
+            source: 'Construct Agent',
+            timestamp: Date.now(),
+          } as unknown as AgentEvent);
+          
+          return Response.json({ ok: true }, { headers: corsHeaders });
+        } catch {
+          return Response.json({ error: 'Invalid request' }, { status: 400, headers: corsHeaders });
+        }
+      }
+      
+      // GET /sessions - List all chat sessions
+      if (url.pathname === '/sessions' && req.method === 'GET') {
+        return Response.json({
+          sessions: sessions.listSessions(),
+          active_key: sessions.getActiveKey(),
+        }, { headers: corsHeaders });
+      }
+      
+      // POST /sessions - Create a new session
+      if (url.pathname === '/sessions' && req.method === 'POST') {
+        try {
+          const body = await req.json() as { title?: string };
+          const info = sessions.createSession(body.title);
+          return Response.json(info, { status: 201, headers: corsHeaders });
+        } catch {
+          return Response.json({ error: 'Invalid request' }, { status: 400, headers: corsHeaders });
+        }
+      }
+      
+      // DELETE /sessions/:key - Delete a session
+      const deleteMatch = url.pathname.match(/^\/sessions\/([^/]+)$/);
+      if (deleteMatch && req.method === 'DELETE') {
+        const key = deleteMatch[1];
+        const ok = sessions.deleteSession(key);
+        if (!ok) {
+          return Response.json(
+            { error: 'Cannot delete session (not found or last remaining)' },
+            { status: 400, headers: corsHeaders },
+          );
+        }
+        return Response.json({ ok: true, active_key: sessions.getActiveKey() }, { headers: corsHeaders });
+      }
+      
+      // PUT /sessions/:key - Rename a session
+      const putMatch = url.pathname.match(/^\/sessions\/([^/]+)$/);
+      if (putMatch && req.method === 'PUT') {
+        try {
+          const body = await req.json() as { title?: string };
+          const key = putMatch[1];
+          if (!body.title) {
+            return Response.json({ error: 'title is required' }, { status: 400, headers: corsHeaders });
+          }
+          const ok = sessions.renameSession(key, body.title);
+          if (!ok) {
+            return Response.json({ error: 'Session not found' }, { status: 404, headers: corsHeaders });
+          }
+          return Response.json({ ok: true }, { headers: corsHeaders });
+        } catch {
+          return Response.json({ error: 'Invalid request' }, { status: 400, headers: corsHeaders });
+        }
+      }
+      
+      // PUT /sessions/:key/activate - Switch active session
+      const activateMatch = url.pathname.match(/^\/sessions\/([^/]+)\/activate$/);
+      if (activateMatch && req.method === 'PUT') {
+        const key = activateMatch[1];
+        const ok = sessions.setActiveKey(key);
+        if (!ok) {
+          return Response.json({ error: 'Session not found' }, { status: 404, headers: corsHeaders });
+        }
+        return Response.json({ ok: true, active_key: key }, { headers: corsHeaders });
       }
       
       return new Response('Not Found', { status: 404, headers: corsHeaders });
@@ -194,10 +299,76 @@ export function startServer(options: ServerOptions): ReturnType<typeof Bun.serve
   return serverInstance;
 }
 
+/**
+ * Generate a short chat title from the user's first message.
+ * Fire-and-forget — errors are silently ignored.
+ */
+async function generateSessionTitle(
+  userMessage: string,
+  openrouter: { apiKey: string; baseUrl: string },
+  sessions: SessionManager,
+  sessionKey: string,
+): Promise<void> {
+  if (!openrouter.apiKey) return;
+
+  try {
+    const res = await fetch(`${openrouter.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openrouter.apiKey}`,
+        'HTTP-Referer': 'https://construct.computer',
+        'X-Title': 'BoneClaw Agent',
+      },
+      body: JSON.stringify({
+        model: TITLE_MODEL,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Generate a very short chat title (max 64 characters) that summarises what the user wants to talk about. ' +
+              'Reply with ONLY the title text, no quotes, no punctuation at the end, no extra explanation.',
+          },
+          { role: 'user', content: userMessage },
+        ],
+        max_tokens: 32,
+        temperature: 0.5,
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!res.ok) return;
+
+    const data = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    let title = data.choices?.[0]?.message?.content?.trim();
+    if (!title) return;
+
+    // Enforce 64-char cap and strip surrounding quotes
+    title = title.replace(/^["']|["']$/g, '').slice(0, 64);
+
+    sessions.renameSession(sessionKey, title);
+
+    // Broadcast so the frontend picks up the new name
+    broadcastEvent({
+      type: 'session:renamed',
+      sessionKey,
+      title,
+      timestamp: Date.now(),
+    } as unknown as AgentEvent);
+  } catch {
+    // Best-effort — don't break the chat flow
+  }
+}
+
 async function handleChat(
   req: Request, 
   agentLoop: AgentLoop,
-  corsHeaders: Record<string, string>
+  sessions: SessionManager,
+  openrouter: { apiKey: string; baseUrl: string },
+  corsHeaders: Record<string, string>,
 ): Promise<Response> {
   try {
     const body = await req.json() as { message?: string; session_key?: string };
@@ -210,10 +381,19 @@ async function handleChat(
         { status: 400, headers: corsHeaders }
       );
     }
+
+    // Check if this is the first message in the session (title is still "New Chat" / "New Chat N")
+    const sessionInfo = sessions.getSession(sessionKey);
+    const isFirstMessage = !!sessionInfo && /^New Chat( \d+)?$/.test(sessionInfo.title);
     
-    // Run the agent loop with the message
+    // Run the agent loop with the message (session-aware)
     // The agent loop will emit events that get broadcast to WebSocket clients
-    const response = await agentLoop.run(message);
+    const response = await agentLoop.run(message, sessionKey);
+
+    // Auto-generate a title after the first message (fire-and-forget)
+    if (isFirstMessage) {
+      generateSessionTitle(message, openrouter, sessions, sessionKey);
+    }
     
     return Response.json({
       response: response || 'OK',

@@ -124,6 +124,24 @@ export class AgentClient {
   }
 
   /**
+   * Abort the agent's currently running loop.
+   */
+  async abortRun(instanceId: string): Promise<boolean> {
+    const session = this.sessions.get(instanceId)
+    if (!session) throw new Error(`No agent session for instance ${instanceId}`)
+
+    const url = `http://127.0.0.1:${session.port}/abort`
+    const res = await fetch(url, {
+      method: 'POST',
+      signal: AbortSignal.timeout(5_000),
+    })
+
+    if (!res.ok) return false
+    const data = await res.json() as { aborted: boolean }
+    return data.aborted
+  }
+
+  /**
    * Get the agent's current status.
    */
   async getStatus(instanceId: string): Promise<AgentStatus> {
@@ -157,6 +175,80 @@ export class AgentClient {
     const res = await fetch(url)
     if (!res.ok) throw new Error(`History request failed: ${res.status}`)
     return await res.json() as { session_key: string; messages: Array<Record<string, unknown>> }
+  }
+
+  /**
+   * List all chat sessions for an instance.
+   */
+  async getChatSessions(instanceId: string): Promise<{ sessions: Array<Record<string, unknown>>; active_key: string }> {
+    const session = this.sessions.get(instanceId)
+    if (!session) throw new Error(`No agent session for instance ${instanceId}`)
+
+    const url = `http://127.0.0.1:${session.port}/sessions`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`Sessions request failed: ${res.status}`)
+    return await res.json() as { sessions: Array<Record<string, unknown>>; active_key: string }
+  }
+
+  /**
+   * Create a new chat session.
+   */
+  async createChatSession(instanceId: string, title?: string): Promise<Record<string, unknown>> {
+    const session = this.sessions.get(instanceId)
+    if (!session) throw new Error(`No agent session for instance ${instanceId}`)
+
+    const url = `http://127.0.0.1:${session.port}/sessions`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    })
+    if (!res.ok) throw new Error(`Create session failed: ${res.status}`)
+    return await res.json() as Record<string, unknown>
+  }
+
+  /**
+   * Delete a chat session.
+   */
+  async deleteChatSession(instanceId: string, sessionKey: string): Promise<{ ok: boolean; active_key: string }> {
+    const session = this.sessions.get(instanceId)
+    if (!session) throw new Error(`No agent session for instance ${instanceId}`)
+
+    const url = `http://127.0.0.1:${session.port}/sessions/${encodeURIComponent(sessionKey)}`
+    const res = await fetch(url, { method: 'DELETE' })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as Record<string, unknown>
+      throw new Error((body.error as string) || `Delete session failed: ${res.status}`)
+    }
+    return await res.json() as { ok: boolean; active_key: string }
+  }
+
+  /**
+   * Rename a chat session.
+   */
+  async renameChatSession(instanceId: string, sessionKey: string, title: string): Promise<void> {
+    const session = this.sessions.get(instanceId)
+    if (!session) throw new Error(`No agent session for instance ${instanceId}`)
+
+    const url = `http://127.0.0.1:${session.port}/sessions/${encodeURIComponent(sessionKey)}`
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    })
+    if (!res.ok) throw new Error(`Rename session failed: ${res.status}`)
+  }
+
+  /**
+   * Switch the active chat session.
+   */
+  async activateChatSession(instanceId: string, sessionKey: string): Promise<void> {
+    const session = this.sessions.get(instanceId)
+    if (!session) throw new Error(`No agent session for instance ${instanceId}`)
+
+    const url = `http://127.0.0.1:${session.port}/sessions/${encodeURIComponent(sessionKey)}/activate`
+    const res = await fetch(url, { method: 'PUT' })
+    if (!res.ok) throw new Error(`Activate session failed: ${res.status}`)
   }
 
   /**

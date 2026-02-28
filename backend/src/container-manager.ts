@@ -152,21 +152,31 @@ export class ContainerManager extends EventEmitter {
     }
   }
 
+  private imageExists(): boolean {
+    try {
+      execSync(`docker image inspect ${SANDBOX_IMAGE}`, { stdio: 'pipe' })
+      return true
+    } catch {
+      return false
+    }
+  }
+
   async createContainer(instanceId: string): Promise<ContainerInfo> {
+    // Fail fast with a clear message if the Docker image hasn't been built
+    if (!this.imageExists()) {
+      throw new Error(
+        `Docker image "${SANDBOX_IMAGE}" not found. Run ./scripts/build.sh docker to build it.`
+      )
+    }
+
     const containerName = `${CONTAINER_PREFIX}${instanceId}`
-    const httpPort = this.nextPort++
-    const browserPort = this.nextPort++
-    const agentPort = this.nextPort++
+
+    // Reserve ports only after successful creation to avoid leaking on failure
+    const httpPort = this.nextPort
+    const browserPort = this.nextPort + 1
+    const agentPort = this.nextPort + 2
 
     console.log(`[ContainerManager] Creating container ${containerName}`)
-
-    const info: ContainerInfo = {
-      id: '',
-      instanceId,
-      status: 'creating',
-      ports: { http: httpPort, browser: browserPort, agent: agentPort },
-      createdAt: new Date(),
-    }
 
     try {
       // Create and start container
@@ -189,15 +199,22 @@ export class ContainerManager extends EventEmitter {
         { encoding: 'utf-8' }
       ).trim()
 
-      info.id = containerId.slice(0, 12)
-      info.status = 'running'
+      // Commit port allocation only on success
+      this.nextPort += 3
+
+      const info: ContainerInfo = {
+        id: containerId.slice(0, 12),
+        instanceId,
+        status: 'running',
+        ports: { http: httpPort, browser: browserPort, agent: agentPort },
+        createdAt: new Date(),
+      }
       
       this.containers.set(instanceId, info)
       console.log(`[ContainerManager] Container ${info.id} created for ${instanceId}`)
 
       return info
     } catch (e) {
-      info.status = 'error'
       console.error(`[ContainerManager] Failed to create container for ${instanceId}:`, e)
       throw e
     }

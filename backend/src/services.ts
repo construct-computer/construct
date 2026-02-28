@@ -72,6 +72,12 @@ export function addDesktopWindow(instanceId: string, type: DesktopWindowType): v
   desktopState.get(instanceId)!.add(type)
 }
 
+/** Remove a window from the desktop state for an instance */
+export function removeDesktopWindow(instanceId: string, type: DesktopWindowType): void {
+  const set = desktopState.get(instanceId)
+  if (set) set.delete(type)
+}
+
 /** Get current desktop state as an array of window types */
 export function getDesktopWindows(instanceId: string): DesktopWindowType[] {
   return Array.from(desktopState.get(instanceId) ?? [])

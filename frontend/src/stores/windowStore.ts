@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type { WindowConfig, WindowType, WindowBounds } from '@/types';
 import { generateId, clamp } from '@/lib/utils';
+import { agentWS } from '@/services/websocket';
 import {
   DEFAULT_WINDOW_WIDTH,
   DEFAULT_WINDOW_HEIGHT,
@@ -257,6 +258,7 @@ export const useWindowStore = create<WindowStore>()(
     
     closeWindow: (id) => {
       const { windows, focusedWindowId } = get();
+      const closing = windows.find((w) => w.id === id);
       const newWindows = windows.filter((w) => w.id !== id);
       
       // If we closed the focused window, focus the next highest z-index window
@@ -274,6 +276,12 @@ export const useWindowStore = create<WindowStore>()(
       }
       
       set({ windows: newWindows, focusedWindowId: newFocusedId });
+      
+      // Notify backend so this window type isn't restored on next refresh.
+      // Only send if no other window of the same type remains open.
+      if (closing && !newWindows.some((w) => w.type === closing.type)) {
+        agentWS.sendWindowClose(closing.type);
+      }
     },
     
     focusWindow: (id) => {

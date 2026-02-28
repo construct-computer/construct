@@ -4,8 +4,9 @@ import { WebSocket as WsWebSocket } from 'ws'
 import { EventEmitter } from 'events'
 import {
   instances, browserClient, terminalServer, agentClient, containerManager,
-  addDesktopWindow, getDesktopWindows, toolToWindowType, desktopActionToWindowType,
+  addDesktopWindow, removeDesktopWindow, getDesktopWindows, toolToWindowType, desktopActionToWindowType,
   updateBrowserCache, browserStateCache,
+  type DesktopWindowType,
 } from '../services'
 import type { AgentEvent } from '../agent-client'
 
@@ -334,6 +335,7 @@ export const wsRoutes = new Elysia()
       try {
         const text = typeof rawMessage === 'string' ? rawMessage : JSON.stringify(rawMessage)
         const msg = JSON.parse(text) as Record<string, unknown>
+
         if (msg.type === 'chat' && typeof msg.message === 'string') {
           const sessionKey = (typeof msg.session_key === 'string' ? msg.session_key : '') || 'ws_default'
           
@@ -362,6 +364,12 @@ export const wsRoutes = new Elysia()
                 }))
               } catch {}
             })
+        } else if (msg.type === 'abort') {
+          // Frontend requested to stop the agent's current run
+          agentClient.abortRun(instanceId).catch(() => {})
+        } else if (msg.type === 'window_close' && typeof msg.windowType === 'string') {
+          // Frontend closed a window — remove it from persisted desktop state
+          removeDesktopWindow(instanceId, msg.windowType as DesktopWindowType)
         }
       } catch {
         // Ignore malformed messages

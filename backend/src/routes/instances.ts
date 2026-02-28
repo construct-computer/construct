@@ -279,6 +279,101 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
     }
   })
 
+  // List chat sessions
+  .get('/:id/agent/sessions', async ({ params, user, set }) => {
+    const instance = checkOwnership(params.id, user!.id)
+    if (!instance) {
+      set.status = 404
+      return { error: 'Instance not found' }
+    }
+
+    try {
+      return await agentClient.getChatSessions(params.id)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set.status = 502
+      return { error: `Agent error: ${msg}` }
+    }
+  })
+
+  // Create a new chat session
+  .post('/:id/agent/sessions', async ({ params, body, user, set }) => {
+    const instance = checkOwnership(params.id, user!.id)
+    if (!instance) {
+      set.status = 404
+      return { error: 'Instance not found' }
+    }
+
+    try {
+      const { title } = (body || {}) as { title?: string }
+      const session = await agentClient.createChatSession(params.id, title)
+      set.status = 201
+      return session
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set.status = 502
+      return { error: `Agent error: ${msg}` }
+    }
+  })
+
+  // Delete a chat session
+  .delete('/:id/agent/sessions/:sessionKey', async ({ params, user, set }) => {
+    const instance = checkOwnership(params.id, user!.id)
+    if (!instance) {
+      set.status = 404
+      return { error: 'Instance not found' }
+    }
+
+    try {
+      return await agentClient.deleteChatSession(params.id, params.sessionKey)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set.status = 502
+      return { error: `Agent error: ${msg}` }
+    }
+  })
+
+  // Rename a chat session
+  .put('/:id/agent/sessions/:sessionKey', async ({ params, body, user, set }) => {
+    const instance = checkOwnership(params.id, user!.id)
+    if (!instance) {
+      set.status = 404
+      return { error: 'Instance not found' }
+    }
+
+    try {
+      const { title } = (body || {}) as { title?: string }
+      if (!title) {
+        set.status = 400
+        return { error: 'title is required' }
+      }
+      await agentClient.renameChatSession(params.id, params.sessionKey, title)
+      return { ok: true }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set.status = 502
+      return { error: `Agent error: ${msg}` }
+    }
+  })
+
+  // Switch active chat session
+  .put('/:id/agent/sessions/:sessionKey/activate', async ({ params, user, set }) => {
+    const instance = checkOwnership(params.id, user!.id)
+    if (!instance) {
+      set.status = 404
+      return { error: 'Instance not found' }
+    }
+
+    try {
+      await agentClient.activateChatSession(params.id, params.sessionKey)
+      return { ok: true, active_key: params.sessionKey }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set.status = 502
+      return { error: `Agent error: ${msg}` }
+    }
+  })
+
   // Get agent status
   .get('/:id/agent/status', async ({ params, user, set }) => {
     const instance = checkOwnership(params.id, user!.id)

@@ -6,6 +6,10 @@
 #   source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 #
 
+# Base Docker image used by the sandbox container Dockerfile.
+# Keep in sync with container/Dockerfile FROM line.
+DOCKER_BASE_IMAGE="node:20-bookworm-slim"
+
 # Detect the Bun cross-compilation target for the Docker container.
 #
 # Docker pulls images matching the host architecture by default, so the
@@ -35,4 +39,21 @@ detect_bun_target() {
             echo "bun-linux-x64"  # safe default
             ;;
     esac
+}
+
+# Pull all base Docker images required by the container build.
+# This runs before `docker build` so that:
+#   1. Network failures surface early with a clear message
+#   2. Subsequent builds can run fully offline from cache
+#
+# Passes through any failure so callers can abort before attempting the build.
+pull_base_images() {
+    echo "  Pulling base image: ${DOCKER_BASE_IMAGE}..."
+    if ! docker pull "$DOCKER_BASE_IMAGE"; then
+        echo ""
+        echo "ERROR: Failed to pull ${DOCKER_BASE_IMAGE}." >&2
+        echo "Check your network connection and Docker Hub access." >&2
+        echo "If you're offline, this will work if the image was previously pulled." >&2
+        return 1
+    fi
 }

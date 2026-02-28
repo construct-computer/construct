@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import * as api from '@/services/api';
+import type { SessionInfo } from '@/services/api';
 import { browserWS, terminalWS, agentWS, type AgentEvent } from '@/services/websocket';
 import type { AgentWithConfig, WindowType } from '@/types';
 import { useWindowStore } from './windowStore';
+import { useNotificationStore } from './notificationStore';
 
 export type ChatMessageRole = 'user' | 'agent' | 'activity';
 
@@ -89,6 +91,11 @@ function describeToolCall(tool: string, params?: Record<string, unknown>): { tex
     return { text: `Desktop: ${action || 'action'}`, activityType: 'desktop' };
   }
 
+  // Notify tool
+  if (tool === 'notify') {
+    return { text: `Notification: ${p.title || 'alert'}`, activityType: 'desktop' };
+  }
+
   // Generic fallback
   return { text: `Using ${tool}`, activityType: 'tool' };
 }
@@ -171,6 +178,10 @@ interface ComputerStore {
   agentActivity: Set<WindowType>; // which apps the agent is actively using
   systemStats: SystemStats | null;
   
+  // Chat sessions
+  chatSessions: SessionInfo[];
+  activeSessionKey: string;
+  
   // Actions
   fetchComputer: () => Promise<void>;
   checkConfigStatus: () => Promise<void>;
@@ -185,6 +196,13 @@ interface ComputerStore {
   // Chat
   loadChatHistory: () => Promise<void>;
   sendChatMessage: (content: string) => void;
+  
+  // Sessions
+  loadSessions: () => Promise<void>;
+  createSession: (title?: string) => Promise<void>;
+  switchSession: (key: string) => Promise<void>;
+  deleteSession: (key: string) => Promise<void>;
+  renameSession: (key: string, title: string) => Promise<void>;
   
   // Terminal
   sendTerminalInput: (data: string) => void;
@@ -226,6 +244,8 @@ export const useComputerStore = create<ComputerStore>()(
     agentConnected: false,
     agentActivity: new Set<WindowType>(),
     systemStats: null,
+    chatSessions: [],
+    activeSessionKey: 'default',
     
     fetchComputer: async () => {
       const { computer: existing } = get();
@@ -353,9 +373,9 @@ export const useComputerStore = create<ComputerStore>()(
       browserWS.connect(instanceId);
       agentWS.connect(instanceId);
       
-      // Load persisted chat history from the container.
-      // This runs async; messages are prepended before any WS-delivered messages.
-      get().loadChatHistory();
+      // Load sessions and persisted chat history from the container.
+      // loadSessions sets activeSessionKey, then loadChatHistory uses it.
+      get().loadSessions().then(() => get().loadChatHistory());
       
       // Fetch desktop state via REST as a fallback sync.
       // The agent WS also sends desktop_state on connect, but the REST call
@@ -492,11 +512,11 @@ export const useComputerStore = create<ComputerStore>()(
     },
     
     loadChatHistory: async () => {
-      const { instanceId } = get();
+      const { instanceId, activeSessionKey } = get();
       if (!instanceId) return;
 
       try {
-        const result = await api.getAgentHistory(instanceId);
+        const result = await api.getAgentHistory(instanceId, activeSessionKey);
         if (!result.success) {
           console.warn('[Store] Failed to load chat history:', result.error);
           return;
@@ -506,20 +526,44 @@ export const useComputerStore = create<ComputerStore>()(
         if (!messages || messages.length === 0) return;
 
         // Map boneclaw messages (system/user/assistant/tool) to frontend ChatMessages.
-        // Only keep user and assistant messages — system prompts and tool results
-        // are internal details, not useful in the chat UI.
+        // Reconstruct tool call activity logs from assistant message tool_calls arrays.
         const history: ChatMessage[] = [];
         for (const msg of messages) {
           if (msg.role === 'user' && msg.content) {
             const content = typeof msg.content === 'string'
               ? msg.content
               : String(msg.content);
+            // Skip injected screenshot placeholders
+            if (content === '[Screenshot of the current browser page]') continue;
             history.push({ role: 'user', content, timestamp: new Date(0) });
-          } else if (msg.role === 'assistant' && msg.content) {
-            const content = typeof msg.content === 'string'
-              ? msg.content
-              : String(msg.content);
-            history.push({ role: 'agent', content, timestamp: new Date(0) });
+          } else if (msg.role === 'assistant') {
+            // Emit activity entries for each tool_call before the text content
+            const toolCalls = msg.tool_calls as Array<{
+              type: string;
+              function: { name: string; arguments: string };
+            }> | undefined;
+            if (toolCalls && Array.isArray(toolCalls)) {
+              for (const tc of toolCalls) {
+                const tool = tc.function?.name || 'tool';
+                let params: Record<string, unknown> | undefined;
+                try { params = JSON.parse(tc.function?.arguments || '{}'); } catch { /* */ }
+                const { text, activityType } = describeToolCall(tool, params);
+                history.push({
+                  role: 'activity',
+                  content: text,
+                  timestamp: new Date(0),
+                  tool,
+                  activityType,
+                });
+              }
+            }
+            // Then the assistant text (if any)
+            if (msg.content) {
+              const content = typeof msg.content === 'string'
+                ? msg.content
+                : String(msg.content);
+              history.push({ role: 'agent', content, timestamp: new Date(0) });
+            }
           }
         }
 
@@ -535,7 +579,7 @@ export const useComputerStore = create<ComputerStore>()(
     },
 
     sendChatMessage: (content) => {
-      const { instanceId, chatMessages } = get();
+      const { instanceId, chatMessages, activeSessionKey } = get();
       if (!instanceId) return;
       
       // Add user message to chat immediately
@@ -547,10 +591,112 @@ export const useComputerStore = create<ComputerStore>()(
         agentThinking: 'Processing...',
       });
       
-      // Send via WebSocket
-      agentWS.sendChat(content);
+      // Send via WebSocket with the active session key
+      agentWS.sendChat(content, activeSessionKey);
     },
     
+    // ── Session management ──────────────────────────────────
+
+    loadSessions: async () => {
+      const { instanceId } = get();
+      if (!instanceId) return;
+
+      try {
+        const result = await api.getAgentSessions(instanceId);
+        if (result.success) {
+          set({
+            chatSessions: result.data.sessions,
+            activeSessionKey: result.data.active_key,
+          });
+        }
+      } catch (err) {
+        console.warn('[Store] Error loading sessions:', err);
+      }
+    },
+
+    createSession: async (title?: string) => {
+      const { instanceId } = get();
+      if (!instanceId) return;
+
+      try {
+        const result = await api.createAgentSession(instanceId, title);
+        if (result.success) {
+          const session = result.data;
+          // Add to list and switch to it
+          set({
+            chatSessions: [session, ...get().chatSessions],
+            activeSessionKey: session.key,
+            chatMessages: [],
+            agentThinking: null,
+          });
+        }
+      } catch (err) {
+        console.warn('[Store] Error creating session:', err);
+      }
+    },
+
+    switchSession: async (key: string) => {
+      const { instanceId, activeSessionKey } = get();
+      if (!instanceId || key === activeSessionKey) return;
+
+      try {
+        const result = await api.activateAgentSession(instanceId, key);
+        if (result.success) {
+          set({
+            activeSessionKey: key,
+            chatMessages: [],
+            agentThinking: null,
+          });
+          // Load the new session's history
+          await get().loadChatHistory();
+        }
+      } catch (err) {
+        console.warn('[Store] Error switching session:', err);
+      }
+    },
+
+    deleteSession: async (key: string) => {
+      const { instanceId } = get();
+      if (!instanceId) return;
+
+      try {
+        const result = await api.deleteAgentSession(instanceId, key);
+        if (result.success) {
+          set({
+            activeSessionKey: result.data.active_key,
+            chatMessages: [],
+            agentThinking: null,
+          });
+          // Reload full session list (a fresh session may have been created
+          // if we just deleted the last one)
+          await get().loadSessions();
+          // Load the now-active session's history
+          await get().loadChatHistory();
+        }
+      } catch (err) {
+        console.warn('[Store] Error deleting session:', err);
+      }
+    },
+
+    renameSession: async (key: string, title: string) => {
+      const { instanceId } = get();
+      if (!instanceId) return;
+
+      try {
+        const result = await api.renameAgentSession(instanceId, key, title);
+        if (result.success) {
+          const { chatSessions } = get();
+          set({
+            chatSessions: chatSessions.map(s =>
+              s.key === key ? { ...s, title } : s
+            ),
+          });
+        }
+      } catch (err) {
+        console.warn('[Store] Error renaming session:', err);
+      }
+    },
+
     sendTerminalInput: (data) => {
       terminalWS.sendInput(data);
     },
@@ -793,6 +939,31 @@ export const useComputerStore = create<ComputerStore>()(
           if (base64) {
             get().setBrowserFrame(base64);
           }
+          break;
+        }
+        
+        case 'session:renamed': {
+          // Auto-generated (or manually renamed) session title
+          const sessionKey = event.data?.sessionKey as string;
+          const title = event.data?.title as string;
+          if (sessionKey && title) {
+            const { chatSessions } = get();
+            set({
+              chatSessions: chatSessions.map(s =>
+                s.key === sessionKey ? { ...s, title } : s
+              ),
+            });
+          }
+          break;
+        }
+        
+        case 'notification': {
+          // Agent sent a desktop notification — show it as a toast
+          const title = event.data?.title as string || 'Agent Notification';
+          const body = event.data?.body as string | undefined;
+          const source = event.data?.source as string | undefined;
+          const variant = event.data?.variant as 'info' | 'success' | 'error' | undefined;
+          useNotificationStore.getState().addNotification({ title, body, source, variant });
           break;
         }
         

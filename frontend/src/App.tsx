@@ -7,7 +7,8 @@ import { WelcomeScreen } from '@/components/screens/WelcomeScreen';
 import { useAuthStore } from '@/stores/authStore';
 import { useComputerStore } from '@/stores/agentStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { preloadAllSounds } from '@/lib/sounds';
+import { preloadAllSounds, installGlobalClickSound } from '@/lib/sounds';
+import { useSettingsStore } from '@/stores/settingsStore';
 import * as api from '@/services/api';
 
 type AuthView = 'login' | 'register';
@@ -44,10 +45,12 @@ function App() {
   const fetchComputer = useComputerStore((s) => s.fetchComputer);
   const unsubscribeFromComputer = useComputerStore((s) => s.unsubscribeFromComputer);
 
-  // Preload sounds and check auth on mount
+  // Preload sounds, install global click listener, and check auth on mount
   useEffect(() => {
     preloadAllSounds();
+    const cleanup = installGlobalClickSound(() => useSettingsStore.getState().soundEnabled);
     checkAuth().then(() => setAuthChecked(true));
+    return cleanup;
   }, [checkAuth]);
 
   // After auth check: show welcome if not logged in
@@ -59,11 +62,12 @@ function App() {
   }, [authChecked, isAuthenticated]);
 
   // Once authenticated, start provisioning the container
+  // Guard: don't retry if there's already an error (user must click "Try Again")
   useEffect(() => {
-    if (isAuthenticated && !computer && !computerLoading && !rebooting) {
+    if (isAuthenticated && !computer && !computerLoading && !computerError && !rebooting) {
       fetchComputer();
     }
-  }, [isAuthenticated, computer, computerLoading, rebooting, fetchComputer]);
+  }, [isAuthenticated, computer, computerLoading, computerError, rebooting, fetchComputer]);
 
   // Slide up lock screen only when container is ready (not just on auth change)
   useEffect(() => {

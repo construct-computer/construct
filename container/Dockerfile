@@ -89,6 +89,40 @@ RUN npm run build
 COPY bin/boneclaw /usr/local/bin/boneclaw
 RUN chmod +x /usr/local/bin/boneclaw
 
+# notify-send shim — routes CLI `notify-send` calls through boneclaw's
+# /notify HTTP endpoint so they appear as real desktop toast notifications,
+# even when the LLM ignores the built-in notify tool.
+# Inlined as a heredoc so it survives reset.sh --hard (which nukes container/bin/).
+# Written to /usr/bin/ to overwrite any system notify-send from libnotify-bin.
+COPY <<'SHIM' /usr/bin/notify-send
+#!/bin/bash
+set -euo pipefail
+PORT="${BONECLAW_PORT:-9223}"
+VARIANT="info"
+TITLE=""
+BODY=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --help) echo "Usage: notify-send [OPTIONS] <summary> [body]"; exit 0 ;;
+    -u|--urgency) case "${2:-normal}" in critical) VARIANT="error" ;; *) VARIANT="info" ;; esac; shift 2 ;;
+    --urgency=*) case "${1#*=}" in critical) VARIANT="error" ;; *) VARIANT="info" ;; esac; shift ;;
+    -i|--icon|-t|--expire-time) shift 2 ;;
+    --icon=*|--expire-time=*) shift ;;
+    -h|--hint) shift 2 ;;
+    --hint=*) shift ;;
+    -*) shift ;;
+    *) if [[ -z "$TITLE" ]]; then TITLE="$1"; elif [[ -z "$BODY" ]]; then BODY="$1"; fi; shift ;;
+  esac
+done
+if [[ -z "$TITLE" ]]; then echo "Error: summary required" >&2; exit 1; fi
+JSON=$(printf '{"title":"%s","body":"%s","variant":"%s"}' \
+  "$(echo "$TITLE" | sed 's/"/\\"/g')" \
+  "$(echo "$BODY" | sed 's/"/\\"/g')" \
+  "$VARIANT")
+exec curl -s -o /dev/null -X POST -H "Content-Type: application/json" -d "$JSON" "http://127.0.0.1:${PORT}/notify"
+SHIM
+RUN chmod +x /usr/bin/notify-send
+
 # Copy boneclaw config template
 COPY boneclaw.yaml /etc/boneclaw/config.yaml
 
@@ -161,6 +195,7 @@ ENV HOME=/home/sandbox
 ENV USER=sandbox
 ENV SHELL=/bin/bash
 ENV TERM=xterm-256color
+ENV BONECLAW_PORT=9223
 
 # Expose browser server port + boneclaw HTTP transport port
 EXPOSE 9222 9223

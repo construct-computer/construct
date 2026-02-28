@@ -2,6 +2,7 @@ import type { Config } from '../config';
 import type { Message, ContentPart, ParsedToolCall } from '../llm/types';
 import { OpenRouterClient } from '../llm/openrouter';
 import { Memory } from '../memory';
+import { SessionManager } from '../memory/sessions';
 import { buildSystemPrompt, buildTaskPrompt, buildHeartbeatPrompt } from './prompt';
 import { getToolDefinitions, executeTool } from '../tools/registry';
 import { emit, emitTextDelta, emitThinking, emitComplete, emitError } from '../events/emitter';
@@ -17,8 +18,10 @@ export interface AgentLoopOptions {
 export class AgentLoop {
   private config: Config;
   private llm: OpenRouterClient;
+  private sessions: SessionManager;
   private memory: Memory;
   private running: boolean = false;
+  private abortController: AbortController | null = null;
   private onMessage?: (message: Message) => void;
 
   constructor(options: AgentLoopOptions) {
@@ -33,20 +36,33 @@ export class AgentLoop {
       retryDelayMs: 10000, // 10 seconds base delay for rate limits
     });
     
-    this.memory = new Memory(
+    this.sessions = new SessionManager(
       this.config.memory.persistPath,
       this.config.memory.maxContextTokens
     );
+    // Start with the active session's memory
+    this.memory = this.sessions.getMemory(this.sessions.getActiveKey());
   }
 
   /**
-   * Run a single agent turn with a user message
+   * Run a single agent turn with a user message.
+   * @param sessionKey — which chat session to use (defaults to active session)
    */
-  async run(userMessage: string): Promise<string> {
+  async run(userMessage: string, sessionKey?: string): Promise<string> {
     if (!this.config.openrouter.apiKey) {
       emitError('API key not configured. Please set your OpenRouter API key in Settings.');
       return 'Error: API key not configured. Please set your OpenRouter API key in Settings.';
     }
+    
+    // Create an AbortController for this run so it can be interrupted
+    this.abortController = new AbortController();
+    const { signal } = this.abortController;
+    this.running = true;
+    
+    // Switch to the requested session's memory
+    const key = sessionKey || this.sessions.getActiveKey();
+    this.memory = this.sessions.getMemory(key);
+    this.sessions.touchSession(key);
     
     const systemPrompt = buildSystemPrompt(this.config, this.memory);
     
@@ -68,6 +84,12 @@ export class AgentLoop {
     let visionSupported = true;
     
     while (iterations < MAX_TOOL_ITERATIONS) {
+      // Check for abort before each iteration
+      if (signal.aborted) {
+        finalResponse = finalResponse || '[Stopped by user]';
+        break;
+      }
+      
       iterations++;
       
       try {
@@ -139,6 +161,7 @@ export class AgentLoop {
         let lastScreenshot: string | undefined;
         
         for (const toolCall of toolCalls) {
+          if (signal.aborted) break;
           const result = await executeTool(toolCall, context);
           
           // Capture the last screenshot from browser tool results
@@ -221,11 +244,25 @@ export class AgentLoop {
       finalResponse = finalResponse || 'Error: Max tool iterations reached';
     }
     
-    // Persist memory
+    // Persist memory and clean up
+    this.running = false;
+    this.abortController = null;
     await this.memory.persist();
     
     emitComplete();
     return finalResponse;
+  }
+
+  /**
+   * Abort the currently running agent loop.
+   * The loop will stop at the next check point (before next LLM call or tool execution).
+   */
+  abort(): boolean {
+    if (this.abortController && this.running) {
+      this.abortController.abort();
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -253,10 +290,18 @@ export class AgentLoop {
   }
 
   /**
-   * Get memory instance (for server to access conversation history)
+   * Get memory instance for a session (for server to access conversation history).
    */
-  getMemory(): Memory {
+  getMemory(sessionKey?: string): Memory {
+    if (sessionKey) return this.sessions.getMemory(sessionKey);
     return this.memory;
+  }
+
+  /**
+   * Get the session manager (for server to list/create/delete sessions).
+   */
+  getSessionManager(): SessionManager {
+    return this.sessions;
   }
 
   /**
@@ -267,9 +312,9 @@ export class AgentLoop {
   }
 
   /**
-   * Stop the current run
+   * Stop the current run (legacy alias for abort).
    */
   stop(): void {
-    this.running = false;
+    this.abort();
   }
 }

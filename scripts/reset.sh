@@ -138,22 +138,10 @@ if [ "$HARD_RESET" = true ]; then
     cd "$PROJECT_ROOT/boneclaw" && bun install --silent
     echo "    Done"
 
-    # Step 7: Build boneclaw binary
-    BUN_TARGET=$(detect_bun_target)
-    echo -e "${YELLOW}[7] Building boneclaw binary (target: ${BUN_TARGET})...${NC}"
-    cd "$PROJECT_ROOT/boneclaw"
-    mkdir -p dist
-    bun build src/main.ts --compile --outfile dist/boneclaw --target="$BUN_TARGET"
-    mkdir -p "$PROJECT_ROOT/container/bin"
-    cp dist/boneclaw "$PROJECT_ROOT/container/bin/boneclaw"
-    echo "    Built: $(ls -lh dist/boneclaw | awk '{print $5}'), ${BUN_TARGET}"
-
-    # Step 8: Build Docker image
-    echo -e "${YELLOW}[8] Building Docker image...${NC}"
-    cd "$PROJECT_ROOT/container"
-    docker build -t boneclaw-runtime:latest -t cloud-sandbox-env:latest . 2>&1 | \
-        grep -E "(Step|Successfully|ERROR)" | sed 's/^/    /' || true
-    echo "    Image size: $(docker images boneclaw-runtime:latest --format '{{.Size}}')"
+    # Step 7: Full rebuild (boneclaw + frontend + Docker image)
+    echo ""
+    echo -e "${YELLOW}[7] Rebuilding everything...${NC}"
+    "$SCRIPT_DIR/build.sh" all
 fi
 
 echo ""
@@ -161,9 +149,15 @@ echo -e "${GREEN}${BOLD}========================================"
 echo "  Reset Complete!"
 echo "========================================${NC}"
 echo ""
-echo "Next steps:"
-echo "  1. Clear browser localStorage (F12 > Application > Local Storage > Clear)"
-echo "  2. Start backend:  cd backend && bun run dev"
-echo "  3. Start frontend: cd frontend && bun run dev"
-echo "  4. Open http://localhost:5173 and register"
+if [ "$HARD_RESET" = true ]; then
+    echo "Everything has been rebuilt. Ready to go:"
+    echo "  1. Clear browser localStorage (F12 > Application > Local Storage > Clear)"
+    echo "  2. Run: ./scripts/dev.sh"
+    echo "  3. Open http://localhost:5173 and register"
+else
+    echo "Next steps:"
+    echo "  1. Clear browser localStorage (F12 > Application > Local Storage > Clear)"
+    echo "  2. Run: ./scripts/dev.sh"
+    echo "  3. Open http://localhost:5173 and register"
+fi
 echo ""
