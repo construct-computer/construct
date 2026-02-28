@@ -316,6 +316,7 @@ export function Window({ config, children }: WindowProps) {
         onMinimize={handleMinimize}
         onMaximize={handleMaximize}
         onClose={handleClose}
+        onDoubleClick={handleMaximize}
         onMouseDown={handleDragStart}
       />
       

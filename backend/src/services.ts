@@ -52,6 +52,7 @@ export function toolToWindowType(tool: string): DesktopWindowType | null {
   if (tool === 'exec') return 'terminal'
   if (tool === 'read' || tool === 'write' || tool === 'edit' || tool === 'list') return 'editor'
   if (tool === 'file_read' || tool === 'file_write' || tool === 'file_edit') return 'editor'
+  if (tool === 'google_drive') return 'files'
   return null
 }
 
@@ -119,6 +120,103 @@ export function checkOwnership(instanceId: string, userId: string): Instance | n
   return instance
 }
 
+// ── Agent service request handler ──
+// Dispatches service requests from boneclaw tools to backend services.
+
+async function handleAgentServiceRequest(
+  instanceId: string,
+  service: string,
+  action: string,
+  params: Record<string, unknown>,
+): Promise<{ success: boolean; data?: unknown; error?: string }> {
+  if (service === 'drive') {
+    return handleDriveServiceRequest(instanceId, action, params)
+  }
+  return { success: false, error: `Unknown service: ${service}` }
+}
+
+async function handleDriveServiceRequest(
+  instanceId: string,
+  action: string,
+  params: Record<string, unknown>,
+): Promise<{ success: boolean; data?: unknown; error?: string }> {
+  // Resolve instanceId -> userId
+  const instance = instances.get(instanceId)
+  if (!instance) {
+    return { success: false, error: 'Instance not found' }
+  }
+  const userId = instance.userId
+
+  // Check Drive is configured and connected
+  if (!driveService.isConfigured) {
+    return { success: false, error: 'Google Drive integration is not configured. The user needs to set up Google Drive in Settings.' }
+  }
+
+  const status = await driveService.getStatus(userId)
+  if (!status.connected && action !== 'status') {
+    return { success: false, error: 'Google Drive is not connected. Ask the user to connect Google Drive in Settings first.' }
+  }
+
+  switch (action) {
+    case 'status': {
+      return { success: true, data: status }
+    }
+
+    case 'list': {
+      const folderId = (params.folder_id as string) || await driveService.ensureWorkspaceFolder(userId)
+      const files = await driveService.listFolder(userId, folderId)
+      return { success: true, data: { files, folderId } }
+    }
+
+    case 'upload': {
+      const filePath = params.file_path as string
+      if (!filePath) return { success: false, error: 'file_path is required' }
+      const content = await containerManager.readFileBinary(instanceId, filePath)
+      const fileName = filePath.split('/').pop() || 'file'
+      const parentId = (params.drive_folder_id as string) || await driveService.ensureWorkspaceFolder(userId)
+      const fileId = await driveService.uploadFile(userId, parentId, fileName, content)
+      const driveLink = `https://drive.google.com/file/d/${fileId}/view`
+      return { success: true, data: { fileId, fileName, driveLink } }
+    }
+
+    case 'download': {
+      const fileId = params.file_id as string
+      const destination = params.destination as string
+      if (!fileId) return { success: false, error: 'file_id is required' }
+      if (!destination) return { success: false, error: 'destination is required' }
+      const meta = await driveService.getFileMeta(userId, fileId)
+      const content = await driveService.downloadFile(userId, fileId)
+      await containerManager.writeFileBinary(instanceId, destination, content)
+      return { success: true, data: { fileName: meta.name, size: content.length, destination } }
+    }
+
+    case 'search': {
+      const query = params.query as string
+      if (!query) return { success: false, error: 'query is required' }
+      const allFiles = await driveService.listFiles(userId)
+      const lowerQuery = query.toLowerCase()
+      const matches = allFiles.filter(f => f.name.toLowerCase().includes(lowerQuery))
+      return {
+        success: true,
+        data: {
+          files: matches.map(f => ({
+            id: f.id,
+            name: f.name,
+            path: f.path,
+            mimeType: f.mimeType,
+            size: f.size,
+            modifiedTime: f.modifiedTime,
+            isFolder: f.isFolder,
+          })),
+        },
+      }
+    }
+
+    default:
+      return { success: false, error: `Unknown drive action: ${action}` }
+  }
+}
+
 /**
  * Initialize all services.
  * Called once at startup.
@@ -128,6 +226,9 @@ export async function initializeServices(): Promise<void> {
   
   await containerManager.initialize()
   await browserClient.initialize()
+
+  // Wire up service request handler so boneclaw tools can access backend services
+  agentClient.setServiceRequestHandler(handleAgentServiceRequest)
   
   console.log('[Services] Initialization complete')
 }

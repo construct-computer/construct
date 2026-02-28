@@ -34,6 +34,18 @@ interface AgentSession {
 }
 
 /**
+ * Handler for service requests from boneclaw agent tools.
+ * Receives the instanceId, service name, action, and params;
+ * returns a result that gets sent back to the agent over WS.
+ */
+export type ServiceRequestHandler = (
+  instanceId: string,
+  service: string,
+  action: string,
+  params: Record<string, unknown>,
+) => Promise<{ success: boolean; data?: unknown; error?: string }>
+
+/**
  * AgentClient manages WebSocket connections to boneclaw agents running
  * inside Docker containers. It connects to each agent's /events endpoint
  * and relays events to registered callbacks (which forward them to the frontend).
@@ -42,6 +54,15 @@ export class AgentClient {
   private sessions = new Map<string, AgentSession>()
   private maxReconnectAttempts = 30
   private baseReconnectDelay = 1000
+  private serviceRequestHandler: ServiceRequestHandler | null = null
+
+  /**
+   * Register a handler for service requests from the agent.
+   * Called during backend initialization to wire up services like DriveService.
+   */
+  setServiceRequestHandler(handler: ServiceRequestHandler): void {
+    this.serviceRequestHandler = handler
+  }
 
   /**
    * Create a new agent session and connect to the agent's WebSocket.
@@ -311,6 +332,21 @@ export class AgentClient {
       ws.on('message', (data: Buffer) => {
         try {
           const event = JSON.parse(data.toString()) as AgentEvent
+
+          // Intercept service_request events — these are from agent tools
+          // requesting backend services (e.g. Google Drive). Handle them
+          // and send the response back; don't forward to frontend callbacks.
+          if (event.type === 'service_request') {
+            this.handleServiceRequest(session, event as unknown as {
+              type: 'service_request'
+              requestId: string
+              service: string
+              action: string
+              params: Record<string, unknown>
+            })
+            return
+          }
+
           for (const callback of session.eventCallbacks) {
             try {
               callback(event)
@@ -338,6 +374,44 @@ export class AgentClient {
       session.ws = ws
     } catch {
       this.scheduleReconnect(session)
+    }
+  }
+
+  /**
+   * Handle a service_request from the agent. Dispatches to the registered
+   * handler and sends the result back over the WS connection.
+   */
+  private async handleServiceRequest(
+    session: AgentSession,
+    request: { type: 'service_request'; requestId: string; service: string; action: string; params: Record<string, unknown> },
+  ): Promise<void> {
+    let result: { success: boolean; data?: unknown; error?: string }
+
+    if (!this.serviceRequestHandler) {
+      result = { success: false, error: 'No service request handler registered' }
+    } else {
+      try {
+        result = await this.serviceRequestHandler(session.instanceId, request.service, request.action, request.params)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.error(`[AgentClient] Service request error (${request.service}.${request.action}):`, message)
+        result = { success: false, error: message }
+      }
+    }
+
+    // Send the response back to boneclaw over the same WS
+    if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+      try {
+        session.ws.send(JSON.stringify({
+          type: 'service_response',
+          requestId: request.requestId,
+          success: result.success,
+          data: result.data,
+          error: result.error,
+        }))
+      } catch (err) {
+        console.error('[AgentClient] Failed to send service response:', err)
+      }
     }
   }
 

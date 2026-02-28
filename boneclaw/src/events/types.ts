@@ -53,3 +53,24 @@ export interface WindowState {
   focused: boolean;
   data?: unknown;
 }
+
+// ── Service request/response protocol ──
+// Used for boneclaw <-> backend bidirectional communication over the existing WS.
+// boneclaw sends service_request, backend processes it and sends service_response back.
+
+export interface ServiceRequest {
+  type: 'service_request';
+  requestId: string;
+  service: string;      // e.g. 'drive'
+  action: string;       // e.g. 'upload', 'download', 'list', 'status'
+  params: Record<string, unknown>;
+  timestamp: number;
+}
+
+export interface ServiceResponse {
+  type: 'service_response';
+  requestId: string;
+  success: boolean;
+  data?: unknown;
+  error?: string;
+}

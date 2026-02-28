@@ -9,7 +9,7 @@
  */
 
 import type { ServerWebSocket } from 'bun';
-import type { AgentEvent } from './events/types';
+import type { AgentEvent, ServiceResponse } from './events/types';
 import type { AgentLoop } from './agent/loop';
 import type { Memory } from './memory';
 import type { SessionManager } from './memory/sessions';
@@ -17,6 +17,58 @@ import { getTinyfishState } from './tools/web_search';
 
 // WebSocket clients subscribed to events
 const eventClients = new Set<ServerWebSocket<unknown>>();
+
+// ── Service request/response protocol ──
+// Pending service requests awaiting a response from the backend.
+
+interface PendingRequest {
+  resolve: (result: { success: boolean; data?: unknown; error?: string }) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
+const pendingServiceRequests = new Map<string, PendingRequest>();
+
+const SERVICE_REQUEST_TIMEOUT = 60_000; // 60 seconds
+
+/**
+ * Send a service request to the backend via the existing WS connection.
+ * Returns a promise that resolves when the backend sends a response.
+ * Used by agent tools (e.g. google_drive) that need backend services.
+ */
+export function sendServiceRequest(
+  service: string,
+  action: string,
+  params: Record<string, unknown>,
+): Promise<{ success: boolean; data?: unknown; error?: string }> {
+  if (eventClients.size === 0) {
+    return Promise.reject(new Error('No backend connection available to process service request'));
+  }
+
+  return new Promise((resolve, reject) => {
+    const requestId = crypto.randomUUID();
+
+    const timeout = setTimeout(() => {
+      pendingServiceRequests.delete(requestId);
+      reject(new Error(`Service request timed out after ${SERVICE_REQUEST_TIMEOUT / 1000}s: ${service}.${action}`));
+    }, SERVICE_REQUEST_TIMEOUT);
+
+    pendingServiceRequests.set(requestId, { resolve, reject, timeout });
+
+    const message = JSON.stringify({
+      type: 'service_request',
+      requestId,
+      service,
+      action,
+      params,
+      timestamp: Date.now(),
+    });
+
+    for (const client of eventClients) {
+      try { client.send(message); } catch { /* client disconnected */ }
+    }
+  });
+}
 
 /**
  * Transform boneclaw events to the format the frontend expects.
@@ -327,9 +379,31 @@ export function startServer(options: ServerOptions): ReturnType<typeof Bun.serve
         }
       },
       
-      message(_ws, _message) {
-        // We don't expect messages from clients on the events endpoint
-        // Chat is handled via HTTP POST
+      message(_ws, rawMessage) {
+        // Handle service_response messages from the backend.
+        // The backend sends these in response to service_request events
+        // (e.g. Google Drive operations requested by agent tools).
+        try {
+          const text = typeof rawMessage === 'string'
+            ? rawMessage
+            : Buffer.from(rawMessage).toString('utf-8');
+          const msg = JSON.parse(text) as Record<string, unknown>;
+
+          if (msg.type === 'service_response' && typeof msg.requestId === 'string') {
+            const pending = pendingServiceRequests.get(msg.requestId);
+            if (pending) {
+              clearTimeout(pending.timeout);
+              pendingServiceRequests.delete(msg.requestId);
+              pending.resolve({
+                success: !!msg.success,
+                data: msg.data,
+                error: msg.error as string | undefined,
+              });
+            }
+          }
+        } catch {
+          // Ignore malformed messages
+        }
       },
       
       close(ws) {

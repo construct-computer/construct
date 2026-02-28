@@ -108,6 +108,29 @@ function describeToolCall(tool: string, params?: Record<string, unknown>): { tex
     return { text: `Notification: ${p.title || 'alert'}`, activityType: 'desktop' };
   }
 
+  // Google Drive tool
+  if (tool === 'google_drive') {
+    const action = p.action as string | undefined;
+    const filePath = p.file_path as string | undefined;
+    const query = p.query as string | undefined;
+    switch (action) {
+      case 'status':
+        return { text: 'Checking Google Drive status', activityType: 'file' };
+      case 'list':
+        return { text: 'Listing Google Drive files', activityType: 'file' };
+      case 'upload': {
+        const name = filePath ? filePath.split('/').pop() : 'file';
+        return { text: `Uploading ${name} to Google Drive`, activityType: 'file' };
+      }
+      case 'download':
+        return { text: `Downloading file from Google Drive`, activityType: 'file' };
+      case 'search':
+        return { text: `Searching Drive for "${query || '...'}"`, activityType: 'file' };
+      default:
+        return { text: `Google Drive: ${action || 'operation'}`, activityType: 'file' };
+    }
+  }
+
   // Generic fallback
   return { text: `Using ${tool}`, activityType: 'tool' };
 }
@@ -120,6 +143,7 @@ function toolToWindowType(tool: string): WindowType | null {
   if (tool === 'exec') return 'terminal';
   if (tool === 'read' || tool === 'write' || tool === 'edit' || tool === 'list') return 'editor';
   if (tool === 'file_read' || tool === 'file_write' || tool === 'file_edit') return 'editor';
+  if (tool === 'google_drive') return 'files';
   return null;
 }
 
