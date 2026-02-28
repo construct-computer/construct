@@ -26,6 +26,12 @@ const TinyFishSchema = z.object({
   defaultProfile: z.enum(['lite', 'stealth']).default('lite'),
 });
 
+// AgentMail config schema
+const AgentMailSchema = z.object({
+  apiKey: z.string().default(''),
+  inboxUsername: z.string().default(''),
+});
+
 // Full config schema
 const ConfigSchema = z.object({
   openrouter: z.object({
@@ -37,6 +43,10 @@ const ConfigSchema = z.object({
     apiKey: '',
     baseUrl: 'https://agent.tinyfish.ai',
     defaultProfile: 'lite',
+  }),
+  agentmail: AgentMailSchema.default({
+    apiKey: '',
+    inboxUsername: '',
   }),
   identity: z.object({
     name: z.string().default('BoneClaw Agent'),
@@ -69,6 +79,10 @@ const DEFAULT_CONFIG: Config = {
     apiKey: '',
     baseUrl: 'https://agent.tinyfish.ai',
     defaultProfile: 'lite',
+  },
+  agentmail: {
+    apiKey: '',
+    inboxUsername: '',
   },
   identity: {
     name: 'BoneClaw Agent',
@@ -120,6 +134,12 @@ function parseYamlConfig(content: string): Partial<Config> {
   const tinyfishKeyMatch = content.match(/tinyfish:\s*\n\s*api_key:\s*"([^"]*)"/m);
   const tinyfishApiKey = tinyfishKeyMatch ? tinyfishKeyMatch[1] : '';
   
+  // Extract AgentMail config: agentmail:\n    api_key: "..."\n    inbox_username: "..."
+  const agentmailKeyMatch = content.match(/agentmail:\s*\n\s*api_key:\s*"([^"]*)"/m);
+  const agentmailApiKey = agentmailKeyMatch ? agentmailKeyMatch[1] : '';
+  const agentmailUsernameMatch = content.match(/agentmail:\s*[\s\S]*?inbox_username:\s*"([^"]*)"/m);
+  const agentmailInboxUsername = agentmailUsernameMatch ? agentmailUsernameMatch[1] : '';
+  
   // Extract transport port: port: N
   const portMatch = content.match(/transport:\s*\n\s*http:\s*\n\s*enabled:\s*true\s*\n\s*port:\s*(\d+)/m);
   const _port = portMatch ? parseInt(portMatch[1], 10) : undefined;
@@ -136,6 +156,14 @@ function parseYamlConfig(content: string): Partial<Config> {
     config.tinyfish = {
       ...DEFAULT_CONFIG.tinyfish,
       apiKey: tinyfishApiKey,
+    };
+  }
+  
+  if (agentmailApiKey || agentmailInboxUsername) {
+    config.agentmail = {
+      ...DEFAULT_CONFIG.agentmail,
+      ...(agentmailApiKey ? { apiKey: agentmailApiKey } : {}),
+      ...(agentmailInboxUsername ? { inboxUsername: agentmailInboxUsername } : {}),
     };
   }
   
@@ -217,12 +245,22 @@ export function loadConfig(configPath?: string): Config {
     };
   }
   
+  // Override with AgentMail env vars
+  if (process.env.AGENTMAIL_API_KEY) {
+    config.agentmail = {
+      ...DEFAULT_CONFIG.agentmail,
+      ...config.agentmail,
+      apiKey: process.env.AGENTMAIL_API_KEY,
+    };
+  }
+  
   // Merge with defaults and validate
   const merged = {
     ...DEFAULT_CONFIG,
     ...config,
     openrouter: { ...DEFAULT_CONFIG.openrouter, ...config.openrouter },
     tinyfish: { ...DEFAULT_CONFIG.tinyfish, ...config.tinyfish },
+    agentmail: { ...DEFAULT_CONFIG.agentmail, ...config.agentmail },
     identity: { ...DEFAULT_CONFIG.identity, ...config.identity },
     memory: { ...DEFAULT_CONFIG.memory, ...config.memory },
     heartbeat: { ...DEFAULT_CONFIG.heartbeat, ...config.heartbeat },
@@ -243,5 +281,6 @@ export function getConfigSummary(config: Config): Record<string, unknown> {
     workspace: config.workspace,
     hasApiKey: !!config.openrouter.apiKey,
     hasTinyfishKey: !!config.tinyfish.apiKey,
+    hasAgentmailKey: !!config.agentmail.apiKey,
   };
 }

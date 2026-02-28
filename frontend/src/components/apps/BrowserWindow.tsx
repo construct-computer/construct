@@ -84,6 +84,33 @@ export function BrowserWindow({ config: _config }: BrowserWindowProps) {
     ? `data:image/${screenshot.startsWith('iVBOR') ? 'png' : 'jpeg'};base64,${screenshot}`
     : null;
 
+  // ── TinyFish iframe health tracking ─────────────────────────────────────
+  // The TinyFish cloud browser viewer can die independently of the SSE
+  // stream (progress events keep flowing but the iframe shows an error).
+  // Detect this by counting iframe loads: the first is the stream, a second
+  // means the page was replaced (e.g. "session ended" / "no service").
+  const iframeLoadCount = useRef(0);
+  const [iframeStreamDead, setIframeStreamDead] = useState(false);
+
+  // Reset when the streaming URL changes (new session)
+  useEffect(() => {
+    iframeLoadCount.current = 0;
+    setIframeStreamDead(false);
+  }, [tinyfishStreamUrl]);
+
+  const handleIframeLoad = useCallback(() => {
+    iframeLoadCount.current++;
+    // Second load = the live stream page was replaced with an error page
+    if (iframeLoadCount.current > 1) {
+      setIframeStreamDead(true);
+    }
+  }, []);
+
+  const handleIframeError = useCallback(() => {
+    // Network-level error (connection refused, DNS failure, etc.)
+    setIframeStreamDead(true);
+  }, []);
+
   const realTabs = tabs.filter(isRealTab);
   // Show tab bar when there are multiple tabs (even if some are new-tab pages)
   const showTabBar = tabs.length > 1;
@@ -404,15 +431,28 @@ export function BrowserWindow({ config: _config }: BrowserWindowProps) {
               </span>
               TinyFish Web Agent working...
             </div>
-            <div className="flex-1 w-full relative">
-              <iframe
-                src={tinyfishStreamUrl}
-                className="absolute inset-0 w-full h-full border-none bg-white"
-                sandbox="allow-scripts allow-same-origin"
-                title="TinyFish Live Browser Stream"
-              />
-              <div className="absolute inset-0 z-10" />
-            </div>
+            {iframeStreamDead ? (
+              /* Cloud browser viewer died but TinyFish is still working via SSE */
+              <div className="flex-1 w-full flex items-center justify-center bg-neutral-900">
+                <div className="text-center text-neutral-400">
+                  <Monitor className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                  <p className="text-sm font-medium">TinyFish is working in the background</p>
+                  <p className="text-xs mt-1 opacity-60">Live preview disconnected — results will appear in chat</p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 w-full relative">
+                <iframe
+                  src={tinyfishStreamUrl}
+                  className="absolute inset-0 w-full h-full border-none bg-white"
+                  sandbox="allow-scripts allow-same-origin"
+                  title="TinyFish Live Browser Stream"
+                  onLoad={handleIframeLoad}
+                  onError={handleIframeError}
+                />
+                <div className="absolute inset-0 z-10" />
+              </div>
+            )}
           </div>
         ) : null}
 

@@ -154,9 +154,14 @@ export interface ContainerInfo {
 export interface AgentConfigResponse {
   openrouter_api_key: string;
   telegram_bot_token: string;
+  tinyfish_api_key: string;
+  agentmail_api_key: string;
+  agentmail_inbox_username: string;
   model: string;
   has_api_key: boolean;
   has_telegram_token: boolean;
+  has_tinyfish_key: boolean;
+  has_agentmail_key: boolean;
 }
 
 export async function getInstance(): Promise<ApiResult<{ instance: Instance; container: ContainerInfo }>> {
@@ -175,6 +180,8 @@ export async function updateAgentConfig(instanceId: string, config: {
   openrouter_api_key?: string;
   telegram_bot_token?: string;
   tinyfish_api_key?: string;
+  agentmail_api_key?: string;
+  agentmail_inbox_username?: string;
   model?: string;
 }): Promise<ApiResult<{ status: string; message: string }>> {
   return request(`/instances/${instanceId}/agent/config`, {
@@ -199,6 +206,7 @@ export interface AgentConfigStatus {
   hasApiKey: boolean;
   hasTelegramToken: boolean;
   hasTinyfishKey: boolean;
+  hasAgentmailKey: boolean;
 }
 
 export async function getAgentConfigStatus(instanceId: string): Promise<ApiResult<AgentConfigStatus>> {

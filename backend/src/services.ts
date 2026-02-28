@@ -53,6 +53,7 @@ export function toolToWindowType(tool: string): DesktopWindowType | null {
   if (tool === 'read' || tool === 'write' || tool === 'edit' || tool === 'list') return 'editor'
   if (tool === 'file_read' || tool === 'file_write' || tool === 'file_edit') return 'editor'
   if (tool === 'google_drive') return 'files'
+  if (tool === 'email') return 'chat'
   return null
 }
 

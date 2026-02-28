@@ -54,6 +54,7 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
     error,
     hasApiKey,
     hasTinyfishKey,
+    hasAgentmailKey,
     configChecked,
     updateComputer,
     fetchComputer,
@@ -67,6 +68,8 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
   // AI configuration state
   const [apiKey, setApiKey] = useState('');
   const [tinyfishKey, setTinyfishKey] = useState('');
+  const [agentmailKey, setAgentmailKey] = useState('');
+  const [agentmailInboxUsername, setAgentmailInboxUsername] = useState('');
   const [model, setModel] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -102,12 +105,18 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
       }
     }
     
-    const updates: { openrouterApiKey?: string; tinyfishApiKey?: string; model?: string } = { model };
+    const updates: { openrouterApiKey?: string; tinyfishApiKey?: string; agentmailApiKey?: string; agentmailInboxUsername?: string; model?: string } = { model };
     if (apiKey.trim()) {
       updates.openrouterApiKey = apiKey.trim();
     }
     if (tinyfishKey.trim()) {
       updates.tinyfishApiKey = tinyfishKey.trim();
+    }
+    if (agentmailKey.trim()) {
+      updates.agentmailApiKey = agentmailKey.trim();
+    }
+    if (agentmailInboxUsername.trim()) {
+      updates.agentmailInboxUsername = agentmailInboxUsername.trim();
     }
     
     // updateComputer already calls checkConfigStatus + fetchComputer
@@ -117,6 +126,8 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
       setSaveSuccess(true);
       setApiKey('');
       setTinyfishKey('');
+      setAgentmailKey('');
+      setAgentmailInboxUsername('');
       setTimeout(() => setSaveSuccess(false), 2000);
     } else {
       setSaveError('Failed to save configuration');
@@ -441,6 +452,77 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
                 </a>
               </p>
             </div>
+            
+            {/* AgentMail API Key */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <Label className="text-xs">AgentMail API Key</Label>
+                {configChecked && (
+                  <span
+                    className={`flex items-center gap-1 text-[11px] ${
+                      hasAgentmailKey
+                        ? 'text-[var(--color-success)]'
+                        : 'text-[var(--color-text-muted)]'
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        hasAgentmailKey ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-muted)]'
+                      }`}
+                    />
+                    {hasAgentmailKey ? 'Key set' : 'Optional'}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Key className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
+                  <Input
+                    type="text"
+                    autoComplete="off"
+                    data-1p-ignore
+                    data-lpignore="true"
+                    spellCheck={false}
+                    value={agentmailKey}
+                    onChange={(e) => setAgentmailKey(e.target.value)}
+                    placeholder={hasAgentmailKey ? '••••••••••••••••' : 'am_...'}
+                    className="pl-8 text-sm"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                Enables the agent to send and receive emails.{' '}
+                <a 
+                  href="https://agentmail.to" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-[var(--color-accent)] hover:underline"
+                >
+                  Get a key
+                </a>
+              </p>
+            </div>
+            
+            {/* AgentMail Inbox Username */}
+            {(hasAgentmailKey || agentmailKey.trim()) && (
+              <div>
+                <Label className="text-xs mb-1 block">Email Username</Label>
+                <Input
+                  type="text"
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  spellCheck={false}
+                  value={agentmailInboxUsername}
+                  onChange={(e) => setAgentmailInboxUsername(e.target.value)}
+                  placeholder="my-agent"
+                  className="text-sm"
+                />
+                <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                  Your agent's email will be <span className="font-mono">username@agentmail.to</span>. Leave blank for auto-generated.
+                </p>
+              </div>
+            )}
             
             {/* Model Selection */}
             <div>

@@ -38,6 +38,8 @@ function generateBoneclawConfig(config: AgentConfig): string {
   const model = config.model || ''
   const telegramToken = config.telegram_bot_token || ''
   const tinyfishKey = config.tinyfish_api_key || ''
+  const agentmailKey = config.agentmail_api_key || ''
+  const agentmailInboxUsername = config.agentmail_inbox_username || ''
 
   // Escape YAML special chars in strings
   const escapeYaml = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
@@ -57,6 +59,10 @@ function generateBoneclawConfig(config: AgentConfig): string {
 
 tinyfish:
   api_key: "${escapeYaml(tinyfishKey)}"
+
+agentmail:
+  api_key: "${escapeYaml(agentmailKey)}"
+  inbox_username: "${escapeYaml(agentmailInboxUsername)}"
 
 llm:
   default_provider: ${defaultProvider}
@@ -434,6 +440,12 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
       const tinyfishMatch = configContent.match(/tinyfish:\s*\n\s*api_key:\s*"([^"]*)"/m)
       const rawTinyfishKey = tinyfishMatch ? tinyfishMatch[1] : ''
 
+      // Extract AgentMail fields
+      const agentmailMatch = configContent.match(/agentmail:\s*\n\s*api_key:\s*"([^"]*)"/m)
+      const rawAgentmailKey = agentmailMatch ? agentmailMatch[1] : ''
+      const agentmailUsernameMatch = configContent.match(/agentmail:\s*[\s\S]*?inbox_username:\s*"([^"]*)"/m)
+      const agentmailInboxUsername = agentmailUsernameMatch ? agentmailUsernameMatch[1] : ''
+
       const isReal = (s: string) => s.length > 0 && !s.startsWith('${')
 
       const mask = (s: string) => {
@@ -446,10 +458,13 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
         openrouter_api_key: mask(rawApiKey),
         telegram_bot_token: mask(rawTelegramToken),
         tinyfish_api_key: mask(rawTinyfishKey),
+        agentmail_api_key: mask(rawAgentmailKey),
+        agentmail_inbox_username: isReal(agentmailInboxUsername) ? agentmailInboxUsername : '',
         model: isReal(model) ? model : '',
         has_api_key: isReal(rawApiKey),
         has_telegram_token: isReal(rawTelegramToken),
         has_tinyfish_key: isReal(rawTinyfishKey),
+        has_agentmail_key: isReal(rawAgentmailKey),
       }
     } catch {
       set.status = 500
@@ -488,10 +503,11 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
       const hasApiKey = hasRealValue(/openrouter:\s*\n\s*api_key:\s*"([^"]*)"/m)
       const hasTelegramToken = hasRealValue(/token:\s*"([^"]*)"/m)
       const hasTinyfishKey = hasRealValue(/tinyfish:\s*\n\s*api_key:\s*"([^"]*)"/m)
+      const hasAgentmailKey = hasRealValue(/agentmail:\s*\n\s*api_key:\s*"([^"]*)"/m)
 
-      return { configured: hasApiKey, hasApiKey, hasTelegramToken, hasTinyfishKey }
+      return { configured: hasApiKey, hasApiKey, hasTelegramToken, hasTinyfishKey, hasAgentmailKey }
     } catch {
-      return { configured: false, hasApiKey: false, hasTelegramToken: false, hasTinyfishKey: false }
+      return { configured: false, hasApiKey: false, hasTelegramToken: false, hasTinyfishKey: false, hasAgentmailKey: false }
     }
   })
 
@@ -516,6 +532,8 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
       let existingApiKey = ''
       let existingTelegramToken = ''
       let existingTinyfishKey = ''
+      let existingAgentmailKey = ''
+      let existingAgentmailInboxUsername = ''
       let existingModel = ''
 
       try {
@@ -534,6 +552,10 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
         existingModel = clean(extract(/default_model:\s*"([^"]*)"/m))
         const tinyfishMatch = existing.match(/tinyfish:\s*\n\s*api_key:\s*"([^"]*)"/m)
         existingTinyfishKey = clean(tinyfishMatch ? tinyfishMatch[1] : '')
+        const agentmailMatch = existing.match(/agentmail:\s*\n\s*api_key:\s*"([^"]*)"/m)
+        existingAgentmailKey = clean(agentmailMatch ? agentmailMatch[1] : '')
+        const agentmailUsernameMatch = existing.match(/agentmail:\s*[\s\S]*?inbox_username:\s*"([^"]*)"/m)
+        existingAgentmailInboxUsername = clean(agentmailUsernameMatch ? agentmailUsernameMatch[1] : '')
       } catch {
         // Can't read existing config — start from defaults
       }
@@ -542,6 +564,8 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
         openrouter_api_key: config.openrouter_api_key ?? existingApiKey,
         telegram_bot_token: config.telegram_bot_token ?? existingTelegramToken,
         tinyfish_api_key: config.tinyfish_api_key ?? existingTinyfishKey,
+        agentmail_api_key: config.agentmail_api_key ?? existingAgentmailKey,
+        agentmail_inbox_username: config.agentmail_inbox_username ?? existingAgentmailInboxUsername,
         model: config.model ?? existingModel,
       }
 

@@ -131,6 +131,32 @@ function describeToolCall(tool: string, params?: Record<string, unknown>): { tex
     }
   }
 
+  // Email tool
+  if (tool === 'email') {
+    const action = p.action as string | undefined;
+    const to = p.to as string | undefined;
+    const subject = p.subject as string | undefined;
+    const query = p.query as string | undefined;
+    switch (action) {
+      case 'status':
+        return { text: 'Checking email status', activityType: 'tool' };
+      case 'send': {
+        const shortSubject = subject ? (subject.length > 40 ? subject.slice(0, 40) + '...' : subject) : '';
+        return { text: `Sending email${to ? ` to ${to}` : ''}${shortSubject ? `: "${shortSubject}"` : ''}`, activityType: 'tool' };
+      }
+      case 'reply':
+        return { text: 'Replying to email', activityType: 'tool' };
+      case 'inbox':
+        return { text: 'Checking inbox', activityType: 'tool' };
+      case 'thread':
+        return { text: 'Reading email thread', activityType: 'tool' };
+      case 'search':
+        return { text: `Searching emails for "${query || '...'}"`, activityType: 'tool' };
+      default:
+        return { text: `Email: ${action || 'operation'}`, activityType: 'tool' };
+    }
+  }
+
   // Generic fallback
   return { text: `Using ${tool}`, activityType: 'tool' };
 }
@@ -144,6 +170,7 @@ function toolToWindowType(tool: string): WindowType | null {
   if (tool === 'read' || tool === 'write' || tool === 'edit' || tool === 'list') return 'editor';
   if (tool === 'file_read' || tool === 'file_write' || tool === 'file_edit') return 'editor';
   if (tool === 'google_drive') return 'files';
+  if (tool === 'email') return 'chat';
   return null;
 }
 
@@ -207,6 +234,7 @@ interface ComputerStore {
   // API key configuration status
   hasApiKey: boolean;
   hasTinyfishKey: boolean;
+  hasAgentmailKey: boolean;
   configChecked: boolean;
   
   // Real-time state for the computer
@@ -225,7 +253,7 @@ interface ComputerStore {
   // Actions
   fetchComputer: () => Promise<void>;
   checkConfigStatus: () => Promise<void>;
-  updateComputer: (data: { openrouterApiKey?: string; tinyfishApiKey?: string; model?: string }) => Promise<boolean>;
+  updateComputer: (data: { openrouterApiKey?: string; tinyfishApiKey?: string; agentmailApiKey?: string; agentmailInboxUsername?: string; model?: string }) => Promise<boolean>;
   startComputer: () => Promise<boolean>;
   stopComputer: () => Promise<boolean>;
   
@@ -265,6 +293,7 @@ export const useComputerStore = create<ComputerStore>()(
     error: null,
     hasApiKey: false,
     hasTinyfishKey: false,
+    hasAgentmailKey: false,
     configChecked: false,
     browserState: {
       url: '',
@@ -353,11 +382,12 @@ export const useComputerStore = create<ComputerStore>()(
         set({ 
           hasApiKey: result.data.hasApiKey,
           hasTinyfishKey: result.data.hasTinyfishKey,
+          hasAgentmailKey: result.data.hasAgentmailKey,
           configChecked: true,
         });
       } else {
         // If we can't check, assume not configured
-        set({ configChecked: true, hasApiKey: false, hasTinyfishKey: false });
+        set({ configChecked: true, hasApiKey: false, hasTinyfishKey: false, hasAgentmailKey: false });
       }
     },
     
@@ -368,6 +398,8 @@ export const useComputerStore = create<ComputerStore>()(
       const result = await api.updateAgentConfig(instanceId, {
         openrouter_api_key: data.openrouterApiKey,
         tinyfish_api_key: data.tinyfishApiKey,
+        agentmail_api_key: data.agentmailApiKey,
+        agentmail_inbox_username: data.agentmailInboxUsername,
         model: data.model,
       });
       

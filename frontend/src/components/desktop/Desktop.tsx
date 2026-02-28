@@ -32,8 +32,8 @@ export function Desktop({ onLogout, onLockScreen, onRestart, isConnected }: Desk
       const hasSetupWindow = windows.some((w) => w.type === 'setup');
       if (!hasSetupWindow) {
         setupShownRef.current = true;
-        const width = 480;
-        const height = 520;
+        const width = 560;
+        const height = 640;
         const x = Math.max(0, (window.innerWidth - width) / 2);
         const y = Math.max(MENUBAR_HEIGHT, (window.innerHeight - DOCK_HEIGHT - height) / 2);
         openWindow('setup', {

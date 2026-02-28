@@ -9,6 +9,10 @@ telegram:
 tinyfish:
   api_key: ""
 
+agentmail:
+  api_key: ""
+  inbox_username: ""
+
 llm:
   default_provider: openrouter
   default_model: ""

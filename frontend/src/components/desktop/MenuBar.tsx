@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Wifi, WifiOff, Settings, Sun, Moon, Volume2, VolumeOff, Lock, RotateCcw, List } from 'lucide-react';
+import { Wifi, WifiOff, Settings, Wand2, Sun, Moon, Volume2, VolumeOff, Lock, RotateCcw, List } from 'lucide-react';
 import { useWindowStore } from '@/stores/windowStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useNotificationStore } from '@/stores/notificationStore';
-import { MENUBAR_HEIGHT, Z_INDEX } from '@/lib/constants';
+import { MENUBAR_HEIGHT, DOCK_HEIGHT, Z_INDEX } from '@/lib/constants';
 import { formatTime, formatDate } from '@/lib/utils';
 
 // Assets
@@ -106,6 +106,14 @@ export function MenuBar({ onLogout, onLockScreen, onRestart, isConnected }: Menu
             <MenuItem label="About" onClick={() => { openWindow('about'); setMenu({ open: null }); }} />
             <MenuDivider />
             <MenuItem label="Settings..." icon={<Settings className="w-3.5 h-3.5" />} onClick={() => { openWindow('settings'); setMenu({ open: null }); }} />
+            <MenuItem label="Setup Wizard..." icon={<Wand2 className="w-3.5 h-3.5" />} onClick={() => {
+              const width = 560;
+              const height = 640;
+              const x = Math.max(0, (window.innerWidth - width) / 2);
+              const y = Math.max(MENUBAR_HEIGHT, (window.innerHeight - DOCK_HEIGHT - height) / 2);
+              openWindow('setup', { title: 'Welcome to construct.computer', x, y, width, height });
+              setMenu({ open: null });
+            }} />
             <MenuDivider />
             <MenuItem
               label={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}

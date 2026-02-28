@@ -6,6 +6,7 @@ import { readTool, writeTool, editTool, listTool } from './filesystem';
 import { notifyTool } from './notify';
 import { webSearchTool } from './web_search';
 import { googleDriveTool } from './google_drive';
+import { emailTool } from './email';
 import { emitToolStart, emitToolEnd } from '../events/emitter';
 
 /**
@@ -44,6 +45,7 @@ registry.register(listTool);
 registry.register(notifyTool);
 registry.register(webSearchTool);
 registry.register(googleDriveTool);
+registry.register(emailTool);
 
 /**
  * Execute a tool call
