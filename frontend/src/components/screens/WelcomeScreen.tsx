@@ -126,10 +126,11 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
             fontSize: 'clamp(5rem, 15vw, 13rem)',
             lineHeight: 1,
             letterSpacing: '-0.01em',
-            // Warm (red/orange) → cool (green/emerald), repeated 4x for seamless
-            // looping at 400% width. Only 2-3 colors visible across the text.
-            background: 'linear-gradient(90deg, #FB923C 0%, #EF4444 7%, #FB923C 14%, #39FF14 20%, #00FF66 25%, #FB923C 32%, #EF4444 39%, #FB923C 45%, #39FF14 50%, #00FF66 57%, #FB923C 64%, #EF4444 70%, #FB923C 75%, #39FF14 82%, #00FF66 89%, #FB923C 95%, #EF4444 100%)',
-            backgroundSize: '400% 100%',
+            // Starts fully warm (red/orange); green/emerald creeps in from the right.
+            // At 250% width, the initial visible window (0-40%) is pure warm tones.
+            // Animating background-position slides green in from the right edge.
+            background: 'linear-gradient(90deg, #EF4444 0%, #FB923C 20%, #EF4444 38%, #FB923C 48%, #C4A030 55%, #39FF14 65%, #00FF66 75%, #39FF14 88%, #00FF66 100%)',
+            backgroundSize: '250% 100%',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
@@ -138,9 +139,9 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
               WebkitMaskImage: 'linear-gradient(to right, black calc(var(--hello-reveal) - 6%), transparent var(--hello-reveal))',
               maskImage: 'linear-gradient(to right, black calc(var(--hello-reveal) - 6%), transparent var(--hello-reveal))',
             } : {}),
-            // Continuous left-flowing gradient + handwriting reveal
+            // One-shot gradient shift (green creeps in from right) + handwriting reveal
             animation: helloIn
-              ? 'hello-gradient 12s linear infinite, hello-write 2.5s cubic-bezier(0.4, 0, 0.2, 1) forwards'
+              ? 'hello-gradient 6s ease-in forwards, hello-write 2.5s cubic-bezier(0.4, 0, 0.2, 1) forwards'
               : 'none',
             opacity: helloOut ? 0 : helloIn ? 1 : 0,
             transform: helloOut ? 'translateY(-24px)' : 'none',

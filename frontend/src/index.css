@@ -266,11 +266,10 @@ html.dark ::-webkit-scrollbar-thumb:active {
   text-rendering: optimizeLegibility;
 }
 
-/* Continuous leftward-flowing luminous gradient for "hello" text.
-   With background-size: 200%, the visible area is 50% of the gradient image.
-   Shifting from 0% to -100% moves by exactly one full gradient-image width,
-   which equals two visible widths. Since the gradient contains two identical
-   color cycles, the end state is pixel-identical to the start → seamless loop. */
+/* One-shot gradient shift for "hello" text.
+   With background-size: 250%, the visible window is 40% of the gradient image.
+   Position 0% shows the warm (red/orange) portion; animating to 100% slides
+   the green/emerald colours in from the right edge of the text. */
 @keyframes hello-gradient {
   0%   { background-position: 0% 50%; }
   100% { background-position: 100% 50%; }
