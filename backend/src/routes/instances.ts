@@ -48,7 +48,7 @@ function generateBoneclawConfig(config: AgentConfig): string {
   }
 
   const defaultProvider = 'openrouter'
-  const effectiveModel = model || 'nvidia/nemotron-nano-9b-v2:free'
+  const effectiveModel = model || 'nvidia/nemotron-3-nano-30b-a3b:free'
 
   return `telegram:
   token: "${escapeYaml(telegramToken)}"
@@ -444,35 +444,50 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
         timeout: 5000,
       })
 
-      // Try restart first; if boneclaw is in FATAL state it will fail, so fall back to stop+start.
+      // Config is saved — agent restart is best-effort.
+      let agentRestarted = false
       try {
         execFileSync('docker', ['exec', containerName, 'supervisorctl', 'restart', 'boneclaw'], {
           stdio: 'pipe',
           timeout: 10000,
         })
+        agentRestarted = true
       } catch {
         // Likely in FATAL state — stop (ignore errors) then start
         try {
-          execFileSync('docker', ['exec', containerName, 'supervisorctl', 'stop', 'boneclaw'], {
+          try {
+            execFileSync('docker', ['exec', containerName, 'supervisorctl', 'stop', 'boneclaw'], {
+              stdio: 'pipe',
+              timeout: 5000,
+            })
+          } catch { /* may already be stopped */ }
+          execFileSync('docker', ['exec', containerName, 'supervisorctl', 'start', 'boneclaw'], {
             stdio: 'pipe',
-            timeout: 5000,
+            timeout: 10000,
           })
-        } catch { /* may already be stopped */ }
-        execFileSync('docker', ['exec', containerName, 'supervisorctl', 'start', 'boneclaw'], {
-          stdio: 'pipe',
-          timeout: 10000,
-        })
+          agentRestarted = true
+        } catch (restartErr) {
+          const restartMsg = restartErr instanceof Error ? restartErr.message : String(restartErr)
+          console.warn(`[Agent] Config saved but agent restart failed for ${params.id}:`, restartMsg)
+        }
       }
 
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      if (agentRestarted) {
+        await new Promise(resolve => setTimeout(resolve, 2000))
+      }
 
-      console.log(`[Agent] Config updated and boneclaw restarted for ${params.id}`)
-      return { status: 'ok', message: 'Configuration applied, agent restarted' }
+      console.log(`[Agent] Config updated for ${params.id} (agent restarted: ${agentRestarted})`)
+      return {
+        status: 'ok',
+        message: agentRestarted
+          ? 'Configuration applied, agent restarted'
+          : 'Configuration saved (agent could not be restarted)',
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      console.error(`[Agent] Config update failed for ${params.id}:`, msg)
+      console.error(`[Agent] Config write failed for ${params.id}:`, msg)
       set.status = 500
-      return { error: `Config update failed: ${msg}` }
+      return { error: `Config write failed: ${msg}` }
     }
   })
 
@@ -514,6 +529,60 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
       const msg = err instanceof Error ? err.message : String(err)
       set.status = 500
       return { error: `Failed to list directory: ${msg}` }
+    }
+  })
+
+  // Binary file download (returns raw bytes with Content-Type)
+  .get('/:id/files/download', async ({ params, query, user, set }) => {
+    const instance = checkOwnership(params.id, user!.id)
+    if (!instance) {
+      set.status = 404
+      return { error: 'Instance not found' }
+    }
+
+    const container = containerManager.getContainer(params.id)
+    if (!container) {
+      set.status = 404
+      return { error: 'Container not found' }
+    }
+
+    const q = query as Record<string, string | undefined>
+    const filePath = q.path
+    if (!filePath) {
+      set.status = 400
+      return { error: 'path query parameter is required' }
+    }
+
+    try {
+      const content = await containerManager.readFileBinary(params.id, filePath)
+      const fileName = filePath.split('/').pop() || 'file'
+      const ext = fileName.split('.').pop()?.toLowerCase() || ''
+      const mimeMap: Record<string, string> = {
+        // Images
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+        svg: 'image/svg+xml', webp: 'image/webp', ico: 'image/x-icon', bmp: 'image/bmp',
+        // Audio
+        mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac',
+        aac: 'audio/aac', m4a: 'audio/mp4', wma: 'audio/x-ms-wma', opus: 'audio/opus',
+        // Video
+        mp4: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg', mov: 'video/quicktime',
+        avi: 'video/x-msvideo', mkv: 'video/x-matroska',
+        // PDF
+        pdf: 'application/pdf',
+      }
+      const mimeType = mimeMap[ext] || 'application/octet-stream'
+
+      return new Response(new Uint8Array(content), {
+        headers: {
+          'Content-Type': mimeType,
+          'Content-Length': String(content.length),
+          'Cache-Control': 'no-cache',
+        },
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set.status = 500
+      return { error: `Failed to download file: ${msg}` }
     }
   })
 

@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import {
   Cpu,
-  Settings,
   Terminal,
   FolderOpen,
   Globe,
@@ -73,7 +72,7 @@ export function StartMenu({ isOpen, onClose, onLogout }: StartMenuProps) {
   };
 
   const menuItems: MenuItem[] = [
-    { id: 'computer', label: 'My Computer', icon: <Cpu className="w-4 h-4" />, windowType: 'computer' },
+    { id: 'computer', label: 'My Computer', icon: <Cpu className="w-4 h-4" />, windowType: 'settings' },
     { id: 'terminal', label: 'Terminal', icon: <Terminal className="w-4 h-4" />, windowType: 'terminal' },
     { id: 'browser', label: 'Browser', icon: <Globe className="w-4 h-4" />, windowType: 'browser' },
     { id: 'files', label: 'Files', icon: <FolderOpen className="w-4 h-4" />, windowType: 'files' },
@@ -82,7 +81,6 @@ export function StartMenu({ isOpen, onClose, onLogout }: StartMenuProps) {
   ];
 
   const bottomItems: MenuItem[] = [
-    { id: 'settings', label: 'Settings', icon: <Settings className="w-4 h-4" />, windowType: 'settings' },
     { id: 'about', label: 'About', icon: <Info className="w-4 h-4" />, windowType: 'about' },
   ];
 

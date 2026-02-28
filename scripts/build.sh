@@ -14,6 +14,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# Shared helpers (architecture detection, etc.)
+source "$SCRIPT_DIR/lib.sh"
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -24,20 +27,23 @@ NC='\033[0m'
 MODE="${1:-all}"
 
 build_boneclaw() {
-    echo -e "${YELLOW}Building boneclaw binary...${NC}"
+    local target
+    target=$(detect_bun_target)
+    
+    echo -e "${YELLOW}Building boneclaw binary (target: ${target})...${NC}"
     cd "$PROJECT_ROOT/boneclaw"
     
     # Install deps if needed
     [ ! -d "node_modules" ] && bun install --silent
     
     mkdir -p dist
-    bun build src/main.ts --compile --outfile dist/boneclaw --target=bun-linux-x64
+    bun build src/main.ts --compile --outfile dist/boneclaw --target="$target"
     
     # Copy to container
     mkdir -p "$PROJECT_ROOT/container/bin"
     cp dist/boneclaw "$PROJECT_ROOT/container/bin/boneclaw"
     
-    echo -e "${GREEN}  Built: dist/boneclaw ($(ls -lh dist/boneclaw | awk '{print $5}'))${NC}"
+    echo -e "${GREEN}  Built: dist/boneclaw ($(ls -lh dist/boneclaw | awk '{print $5}'), ${target})${NC}"
 }
 
 build_frontend() {

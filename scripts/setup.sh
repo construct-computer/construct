@@ -18,6 +18,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# Shared helpers (architecture detection, etc.)
+source "$SCRIPT_DIR/lib.sh"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -71,11 +74,12 @@ cd "$PROJECT_ROOT/boneclaw" && bun install --silent
 
 # Build boneclaw binary
 echo ""
-echo -e "${YELLOW}Building boneclaw binary...${NC}"
+BUN_TARGET=$(detect_bun_target)
+echo -e "${YELLOW}Building boneclaw binary (target: ${BUN_TARGET})...${NC}"
 cd "$PROJECT_ROOT/boneclaw"
 mkdir -p dist
-bun build src/main.ts --compile --outfile dist/boneclaw --target=bun-linux-x64
-echo "  Built: dist/boneclaw ($(ls -lh dist/boneclaw | awk '{print $5}'))"
+bun build src/main.ts --compile --outfile dist/boneclaw --target="$BUN_TARGET"
+echo "  Built: dist/boneclaw ($(ls -lh dist/boneclaw | awk '{print $5}'), ${BUN_TARGET})"
 
 # Copy to container bin
 mkdir -p "$PROJECT_ROOT/container/bin"

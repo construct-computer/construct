@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Wifi, WifiOff, Settings, Sun, Moon, Volume2, VolumeOff, Lock, RotateCcw } from 'lucide-react';
+import { Wifi, WifiOff, Settings, Sun, Moon, Volume2, VolumeOff, Lock, RotateCcw, List } from 'lucide-react';
 import { useWindowStore } from '@/stores/windowStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useNotificationStore } from '@/stores/notificationStore';
 import { MENUBAR_HEIGHT, Z_INDEX } from '@/lib/constants';
 import { formatTime, formatDate } from '@/lib/utils';
 
@@ -27,6 +28,9 @@ export function MenuBar({ onLogout, onLockScreen, onRestart, isConnected }: Menu
   const logoButtonRef = useRef<HTMLButtonElement>(null);
   const { theme, soundEnabled, toggleTheme, toggleSound } = useSettingsStore();
   const { windows, focusedWindowId, openWindow } = useWindowStore();
+  const toggleDrawer = useNotificationStore((s) => s.toggleDrawer);
+  const drawerOpen = useNotificationStore((s) => s.drawerOpen);
+  const unreadCount = useNotificationStore((s) => s.unreadCount)();
 
   const focusedWindow = windows.find((w) => w.id === focusedWindowId);
   const activeAppName = focusedWindow?.title || 'Finder';
@@ -156,6 +160,23 @@ export function MenuBar({ onLogout, onLockScreen, onRestart, isConnected }: Menu
         <span className="text-sm text-black/70 dark:text-white px-1.5" title={formatDate(time)}>
           {formatTime(time)}
         </span>
+
+        {/* Notification center toggle */}
+        <button
+          id="notification-center-toggle"
+          className={`relative p-1 rounded-md transition ${
+            drawerOpen ? 'bg-black/10 dark:bg-white/15' : 'hover:bg-black/5 dark:hover:bg-white/10'
+          }`}
+          onClick={toggleDrawer}
+          title="Notifications"
+        >
+          <List className="w-4 h-4 text-black/70 dark:text-white" />
+          {unreadCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] flex items-center justify-center px-0.5 rounded-full bg-[var(--color-accent)] text-white text-[9px] font-bold leading-none">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
+        </button>
       </div>
     </div>
   );

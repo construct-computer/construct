@@ -2,6 +2,8 @@ import { ContainerManager } from './container-manager'
 import { BrowserClient } from './browser-client'
 import { TerminalServer } from './terminal-server'
 import { AgentClient } from './agent-client'
+import { DriveService } from './services/drive-service'
+import { DriveSync } from './services/drive-sync'
 
 // Instance type (simplified from production)
 export interface Instance {
@@ -16,6 +18,8 @@ export const containerManager = new ContainerManager()
 export const browserClient = new BrowserClient(containerManager)
 export const terminalServer = new TerminalServer()
 export const agentClient = new AgentClient()
+export const driveService = new DriveService()
+export const driveSync = new DriveSync(driveService, containerManager)
 
 // Track instances in memory (loaded from DB on startup)
 export const instances = new Map<string, Instance>()

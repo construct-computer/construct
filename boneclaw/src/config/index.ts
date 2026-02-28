@@ -23,7 +23,7 @@ const ScheduleSchema = z.object({
 const ConfigSchema = z.object({
   openrouter: z.object({
     apiKey: z.string(),
-    model: z.string().default('nvidia/nemotron-nano-9b-v2:free'),
+    model: z.string().default('nvidia/nemotron-3-nano-30b-a3b:free'),
     baseUrl: z.string().default('https://openrouter.ai/api/v1'),
   }),
   identity: z.object({
@@ -50,7 +50,7 @@ export type Schedule = z.infer<typeof ScheduleSchema>;
 const DEFAULT_CONFIG: Config = {
   openrouter: {
     apiKey: '',
-    model: 'nvidia/nemotron-nano-9b-v2:free',
+    model: 'nvidia/nemotron-3-nano-30b-a3b:free',
     baseUrl: 'https://openrouter.ai/api/v1',
   },
   identity: {

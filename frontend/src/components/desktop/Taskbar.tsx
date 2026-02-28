@@ -95,8 +95,7 @@ export function Taskbar({ onLogout, isConnected }: TaskbarProps) {
                     window.type === 'files' && 'bg-yellow-400',
                     window.type === 'editor' && 'bg-violet-400',
                     window.type === 'chat' && 'bg-cyan-400',
-                    window.type === 'settings' && 'bg-neutral-400',
-                    window.type === 'computer' && 'bg-orange-400',
+                    window.type === 'settings' && 'bg-orange-400',
                     window.type === 'about' && 'bg-teal-400'
                   )}
                 />

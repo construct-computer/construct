@@ -27,6 +27,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# Shared helpers (architecture detection, etc.)
+source "$SCRIPT_DIR/lib.sh"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -136,13 +139,14 @@ if [ "$HARD_RESET" = true ]; then
     echo "    Done"
 
     # Step 7: Build boneclaw binary
-    echo -e "${YELLOW}[7] Building boneclaw binary...${NC}"
+    BUN_TARGET=$(detect_bun_target)
+    echo -e "${YELLOW}[7] Building boneclaw binary (target: ${BUN_TARGET})...${NC}"
     cd "$PROJECT_ROOT/boneclaw"
     mkdir -p dist
-    bun build src/main.ts --compile --outfile dist/boneclaw --target=bun-linux-x64
+    bun build src/main.ts --compile --outfile dist/boneclaw --target="$BUN_TARGET"
     mkdir -p "$PROJECT_ROOT/container/bin"
     cp dist/boneclaw "$PROJECT_ROOT/container/bin/boneclaw"
-    echo "    Built: $(ls -lh dist/boneclaw | awk '{print $5}')"
+    echo "    Built: $(ls -lh dist/boneclaw | awk '{print $5}'), ${BUN_TARGET}"
 
     # Step 8: Build Docker image
     echo -e "${YELLOW}[8] Building Docker image...${NC}"

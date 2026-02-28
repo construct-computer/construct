@@ -83,7 +83,9 @@ COPY browser-server.ts desktop-mcp.ts ./
 RUN npm run build
 
 # --- Install boneclaw agent binary ---
-# The binary must be pre-built for linux/amd64 and placed in bin/
+# The binary must be pre-built for the matching architecture and placed in bin/.
+# Build scripts auto-detect the Docker platform arch (arm64 vs x64):
+#   ./scripts/build.sh boneclaw
 COPY bin/boneclaw /usr/local/bin/boneclaw
 RUN chmod +x /usr/local/bin/boneclaw
 

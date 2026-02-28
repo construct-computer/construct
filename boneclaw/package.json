@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "bun run src/main.ts",
     "build": "bun build src/main.ts --compile --outfile dist/boneclaw",
+    "build:docker": "bash -c 'source ../scripts/lib.sh && bun build src/main.ts --compile --outfile dist/boneclaw --target=$(detect_bun_target) && mkdir -p ../container/bin && cp dist/boneclaw ../container/bin/boneclaw'",
     "test": "bun test"
   },
   "dependencies": {

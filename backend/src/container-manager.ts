@@ -335,6 +335,21 @@ export class ContainerManager extends EventEmitter {
     })
   }
 
+  async readFileBinary(instanceId: string, filePath: string): Promise<Buffer> {
+    const containerName = `${CONTAINER_PREFIX}${instanceId}`
+    return execFileSync('docker', ['exec', containerName, 'cat', filePath], {
+      encoding: 'buffer',
+    })
+  }
+
+  async writeFileBinary(instanceId: string, filePath: string, content: Buffer): Promise<void> {
+    const containerName = `${CONTAINER_PREFIX}${instanceId}`
+    execFileSync('docker', ['exec', '-i', containerName, 'tee', filePath], {
+      input: content,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  }
+
   async listDirectory(instanceId: string, dirPath: string): Promise<Array<{ name: string; type: 'file' | 'directory' | 'symlink'; size: number; modified: string }>> {
     const containerName = `${CONTAINER_PREFIX}${instanceId}`
     const script = [

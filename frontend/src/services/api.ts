@@ -203,6 +203,72 @@ export async function getAgentConfigStatus(instanceId: string): Promise<ApiResul
   return request(`/instances/${instanceId}/agent/config/status`);
 }
 
+/**
+ * Validate an OpenRouter API key by calling their auth endpoint.
+ * Returns { valid: true } on success, or { valid: false, error } on failure.
+ */
+export async function validateOpenRouterKey(apiKey: string): Promise<{ valid: boolean; error?: string }> {
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/auth/key', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+
+    if (response.ok) return { valid: true };
+    if (response.status === 401) return { valid: false, error: 'Invalid API key' };
+    return { valid: false, error: `Validation failed (${response.status})` };
+  } catch {
+    return { valid: false, error: 'Could not validate key. Check your connection.' };
+  }
+}
+
+/**
+ * Fetch model info (name + pricing) from OpenRouter.
+ * Uses the public /api/v1/models endpoint (no auth required).
+ */
+export interface OpenRouterModelInfo {
+  id: string;
+  name: string;
+  pricing: { prompt: string; completion: string } | null;
+}
+
+const modelInfoCache = new Map<string, OpenRouterModelInfo | null>();
+
+export async function fetchModelInfo(modelId: string): Promise<OpenRouterModelInfo | null> {
+  if (modelInfoCache.has(modelId)) return modelInfoCache.get(modelId)!;
+
+  try {
+    const res = await fetch(`https://openrouter.ai/api/v1/models`);
+    if (!res.ok) return null;
+
+    const data = await res.json() as { data: Array<{ id: string; name: string; pricing?: { prompt?: string; completion?: string } }> };
+    // Cache all models from the response for future lookups
+    for (const m of data.data) {
+      const info: OpenRouterModelInfo = {
+        id: m.id,
+        name: m.name,
+        pricing: m.pricing ? { prompt: m.pricing.prompt || '0', completion: m.pricing.completion || '0' } : null,
+      };
+      modelInfoCache.set(m.id, info);
+    }
+
+    return modelInfoCache.get(modelId) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Format per-token pricing to a human-readable $/M tokens string.
+ */
+export function formatModelPrice(perToken: string): string {
+  const n = parseFloat(perToken);
+  if (isNaN(n) || n === 0) return 'Free';
+  const perMillion = n * 1_000_000;
+  if (perMillion < 0.01) return `<$0.01/M`;
+  if (perMillion < 1) return `$${perMillion.toFixed(2)}/M`;
+  return `$${perMillion.toFixed(perMillion % 1 === 0 ? 0 : 2)}/M`;
+}
+
 export async function chatWithAgent(instanceId: string, message: string): Promise<ApiResult<{
   response: string;
   session_key: string;
@@ -256,6 +322,17 @@ export async function readFile(instanceId: string, path: string): Promise<ApiRes
   return request(`/instances/${instanceId}/files/read?path=${encodeURIComponent(path)}`);
 }
 
+/**
+ * Download a binary file from the container. Returns the raw Response
+ * so the caller can create a blob URL for preview.
+ */
+export async function downloadContainerFile(instanceId: string, path: string): Promise<Response> {
+  const token = getToken();
+  return fetch(`${API_BASE_URL}/instances/${instanceId}/files/download?path=${encodeURIComponent(path)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
 export async function writeFile(instanceId: string, path: string, content: string): Promise<ApiResult<{ status: string; path: string }>> {
   return request(`/instances/${instanceId}/files/write`, {
     method: 'PUT',
@@ -291,6 +368,94 @@ export async function renameItem(instanceId: string, oldPath: string, newPath: s
   });
 }
 
+// ============================================================================
+// Google Drive API
+// ============================================================================
+
+export interface DriveStatus {
+  connected: boolean;
+  email?: string;
+  lastSync?: string;
+}
+
+export interface DriveFileEntry {
+  id: string;
+  name: string;
+  type: 'file' | 'directory';
+  size: number;
+  modified?: string;
+  mimeType: string;
+}
+
+export interface DriveSyncReport {
+  downloaded: string[];
+  uploaded: string[];
+  deleted: string[];
+  conflicts: string[];
+  timestamp: string;
+}
+
+export async function getDriveConfigured(): Promise<ApiResult<{ configured: boolean }>> {
+  return request('/drive/configured');
+}
+
+export async function getDriveAuthUrl(): Promise<ApiResult<{ url?: string; error?: string }>> {
+  return request('/drive/auth-url');
+}
+
+export async function getDriveStatus(): Promise<ApiResult<DriveStatus>> {
+  return request('/drive/status');
+}
+
+export async function disconnectDrive(): Promise<ApiResult<{ status: string }>> {
+  return request('/drive/disconnect', { method: 'DELETE' });
+}
+
+export async function listDriveFiles(folderId?: string): Promise<ApiResult<{ files: DriveFileEntry[]; folderId: string }>> {
+  const query = folderId ? `?folderId=${folderId}` : '';
+  return request(`/drive/files${query}`);
+}
+
+export async function readDriveFileContent(fileId: string): Promise<ApiResult<{ content: string }>> {
+  return request(`/drive/files/${fileId}/content`);
+}
+
+export async function downloadDriveFile(fileId: string): Promise<Response> {
+  const token = getToken();
+  return fetch(`${API_BASE_URL}/drive/files/${fileId}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
+export async function deleteDriveFile(fileId: string): Promise<ApiResult<{ status: string }>> {
+  return request(`/drive/files/${fileId}`, { method: 'DELETE' });
+}
+
+export async function createDriveFolder(name: string, parentFolderId?: string): Promise<ApiResult<{ status: string; folderId: string }>> {
+  return request('/drive/mkdir', {
+    method: 'POST',
+    body: JSON.stringify({ name, parentFolderId }),
+  });
+}
+
+export async function copyToDrive(instanceId: string, filePath: string, driveFolderId?: string): Promise<ApiResult<{ status: string; fileId: string }>> {
+  return request(`/drive/copy-to-drive/${instanceId}`, {
+    method: 'POST',
+    body: JSON.stringify({ filePath, driveFolderId }),
+  });
+}
+
+export async function copyToLocal(instanceId: string, driveFileId: string, containerPath: string): Promise<ApiResult<{ status: string }>> {
+  return request(`/drive/copy-to-local/${instanceId}`, {
+    method: 'POST',
+    body: JSON.stringify({ driveFileId, containerPath }),
+  });
+}
+
+export async function syncDrive(instanceId: string): Promise<ApiResult<DriveSyncReport>> {
+  return request(`/drive/sync/${instanceId}`, { method: 'POST' });
+}
+
 // Legacy function for compatibility
 export async function getComputer(): Promise<ApiResult<{ computer: AgentWithConfig }>> {
   // Map instance to legacy "computer" format
@@ -310,7 +475,7 @@ export async function getComputer(): Promise<ApiResult<{ computer: AgentWithConf
     createdAt: instance.createdAt,
     updatedAt: instance.createdAt,
     config: {
-      model: 'nvidia/nemotron-nano-9b-v2:free',
+      model: 'nvidia/nemotron-3-nano-30b-a3b:free',
       goals: [],
       schedules: [],
       identityName: 'BoneClaw Agent',

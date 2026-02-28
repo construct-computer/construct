@@ -4,10 +4,12 @@ import { config, validateConfig, logConfig } from './config';
 import { initDatabase, closeDatabase } from './db/client';
 import { authRoutes } from './routes/auth';
 import { instanceRoutes } from './routes/instances';
+import { createDriveRoutes } from './routes/drive';
 import { wsRoutes } from './ws/handler';
 import { 
   initializeServices, shutdownServices, 
   containerManager, browserClient, agentClient, instances,
+  driveService, driveSync,
   type Instance
 } from './services';
 
@@ -75,6 +77,7 @@ const app = new Elysia()
     app
       .use(authRoutes)
       .use(instanceRoutes)
+      .use(createDriveRoutes(driveService, driveSync))
   )
   // WebSocket routes
   .use(wsRoutes)
@@ -128,6 +131,18 @@ console.log(`
     PUT  /api/instances/:id/agent/config - Update agent config (BYOK)
     POST /api/instances/:id/agent/chat   - Chat with agent
     GET  /api/instances/:id/agent/status - Get agent status
+    
+  Google Drive:
+    GET  /api/drive/configured       - Check if Drive is configured
+    GET  /api/drive/callback         - OAuth callback (from Google)
+    GET  /api/drive/auth-url         - Get OAuth URL
+    GET  /api/drive/status           - Connection status
+    DEL  /api/drive/disconnect       - Disconnect Drive
+    GET  /api/drive/files            - List Drive files
+    POST /api/drive/upload           - Upload to Drive
+    POST /api/drive/copy-to-drive/:id   - Container -> Drive
+    POST /api/drive/copy-to-local/:id   - Drive -> Container
+    POST /api/drive/sync/:id            - Two-way sync
     
   WebSocket Endpoints:
     WS   /ws/browser/:instanceId - Browser screencast stream

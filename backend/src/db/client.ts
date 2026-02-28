@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { SQL_SCHEMA } from './schema';
-import type { User, Agent, AgentConfig, ActivityLog } from './schema';
+import type { User, Agent, AgentConfig, ActivityLog, DriveToken } from './schema';
 import { nanoid } from 'nanoid';
 
 let db: Database | null = null;
@@ -169,7 +169,7 @@ export function deleteAgent(id: string): void {
 export function createAgentConfig(
   agentId: string,
   openrouterKeyEncrypted: string,
-  model: string = 'nvidia/nemotron-nano-9b-v2:free'
+  model: string = 'nvidia/nemotron-3-nano-30b-a3b:free'
 ): AgentConfig {
   const stmt = getDb().prepare(`
     INSERT INTO agent_configs (agent_id, openrouter_key_encrypted, model)
@@ -271,6 +271,49 @@ export function getActivityLogs(
   `);
   
   return stmt.all(agentId, limit, offset) as ActivityLog[];
+}
+
+// ============= Drive Token Operations =============
+
+export function saveDriveTokens(userId: string, tokens: {
+  accessToken: string;
+  refreshToken: string;
+  expiry: string;
+  email?: string;
+}): void {
+  const stmt = getDb().prepare(`
+    INSERT OR REPLACE INTO drive_tokens (user_id, access_token, refresh_token, expiry, email)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  stmt.run(userId, tokens.accessToken, tokens.refreshToken, tokens.expiry, tokens.email ?? null);
+}
+
+export function getDriveTokens(userId: string): DriveToken | null {
+  const stmt = getDb().prepare(`
+    SELECT user_id as userId, access_token as accessToken, refresh_token as refreshToken,
+           expiry, email, folder_id as folderId, last_sync as lastSync
+    FROM drive_tokens WHERE user_id = ?
+  `);
+  return stmt.get(userId) as DriveToken | null;
+}
+
+export function updateDriveAccessToken(userId: string, accessToken: string, expiry: string): void {
+  getDb().prepare('UPDATE drive_tokens SET access_token = ?, expiry = ? WHERE user_id = ?')
+    .run(accessToken, expiry, userId);
+}
+
+export function updateDriveFolderId(userId: string, folderId: string): void {
+  getDb().prepare('UPDATE drive_tokens SET folder_id = ? WHERE user_id = ?')
+    .run(folderId, userId);
+}
+
+export function updateDriveLastSync(userId: string, timestamp: string): void {
+  getDb().prepare('UPDATE drive_tokens SET last_sync = ? WHERE user_id = ?')
+    .run(timestamp, userId);
+}
+
+export function deleteDriveTokens(userId: string): void {
+  getDb().prepare('DELETE FROM drive_tokens WHERE user_id = ?').run(userId);
 }
 
 /**

@@ -15,6 +15,14 @@ export const config = {
   // Encryption
   encryptionKey: process.env.ENCRYPTION_KEY || 'construct-computer-default-key-32b',
   
+  // Google Drive OAuth
+  googleClientId: process.env.GOOGLE_CLIENT_ID || '',
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+  googleRedirectUri: process.env.GOOGLE_REDIRECT_URI || '',
+  
+  // Frontend URL (for OAuth redirect back)
+  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+  
   // CORS
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:3000').split(','),
   

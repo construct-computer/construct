@@ -1,18 +1,40 @@
 import { useState, useEffect } from 'react';
-import { Moon, Sun, Volume2, VolumeX, Key, Cpu, Loader2, Check, Image } from 'lucide-react';
+import {
+  Moon,
+  Sun,
+  Volume2,
+  VolumeX,
+  Key,
+  Cpu,
+  Loader2,
+  Check,
+  Image,
+  Cloud,
+  Unplug,
+  Play,
+  Square,
+  RefreshCw,
+  HardDrive,
+  Wifi,
+  WifiOff,
+  Monitor,
+  Terminal,
+  MessageSquare,
+} from 'lucide-react';
 import { Button, Label, Checkbox, Separator, Input } from '@/components/ui';
 import { useSettingsStore, WALLPAPERS, getWallpaperSrc } from '@/stores/settingsStore';
 import { useComputerStore } from '@/stores/agentStore';
+import { useWindowStore } from '@/stores/windowStore';
+import { useDriveSync } from '@/hooks/useDriveSync';
+import { useSound } from '@/hooks/useSound';
+import { validateOpenRouterKey } from '@/services/api';
 import type { WindowConfig } from '@/types';
 
-// Popular OpenRouter models
+// OpenRouter models — must match SetupWizard choices
 const MODELS = [
-  { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4' },
-  { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
-  { id: 'openai/gpt-4o', name: 'GPT-4o' },
-  { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini' },
-  { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash' },
-  { id: 'nvidia/nemotron-nano-9b-v2:free', name: 'Nemotron Nano (Free)' },
+  { id: 'nvidia/nemotron-3-nano-30b-a3b:free', name: 'Nemotron Nano (Free)' },
+  { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
+  { id: 'moonshotai/kimi-k2.5', name: 'Kimi K2.5' },
   { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B' },
 ];
 
@@ -21,51 +43,292 @@ interface SettingsWindowProps {
 }
 
 export function SettingsWindow({ config: _config }: SettingsWindowProps) {
+  const { play } = useSound();
+  const { openWindow } = useWindowStore();
   const { theme, soundEnabled, wallpaperId, toggleTheme, toggleSound, setWallpaper } =
     useSettingsStore();
   
-  const { computer, updateComputer, fetchComputer } = useComputerStore();
+  const {
+    computer,
+    isLoading,
+    error,
+    hasApiKey,
+    configChecked,
+    updateComputer,
+    fetchComputer,
+    startComputer,
+    stopComputer,
+    subscribeToComputer,
+  } = useComputerStore();
+  const instanceId = useComputerStore((s) => s.instanceId);
+  const driveSync = useDriveSync(instanceId);
   
   // AI configuration state
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   
   // Load current config
   useEffect(() => {
     if (computer?.config) {
-      setModel(computer.config.model || 'nvidia/nemotron-nano-9b-v2:free');
+      setModel(computer.config.model || 'nvidia/nemotron-3-nano-30b-a3b:free');
       // Don't load the actual API key for security - just show placeholder
     }
   }, [computer?.config]);
+
+  // Subscribe to computer events when running
+  useEffect(() => {
+    if (computer?.status === 'running') {
+      subscribeToComputer();
+    }
+  }, [computer?.status, subscribeToComputer]);
   
   const handleSaveAI = async () => {
     setIsSaving(true);
     setSaveSuccess(false);
+    setSaveError(null);
+    
+    // Validate key against OpenRouter if one is being set
+    if (apiKey.trim()) {
+      const validation = await validateOpenRouterKey(apiKey.trim());
+      if (!validation.valid) {
+        setSaveError(validation.error || 'Invalid API key');
+        setIsSaving(false);
+        return;
+      }
+    }
     
     const updates: { openrouterApiKey?: string; model?: string } = { model };
     if (apiKey.trim()) {
       updates.openrouterApiKey = apiKey.trim();
     }
     
+    // updateComputer already calls checkConfigStatus + fetchComputer
     const success = await updateComputer(updates);
     
     if (success) {
       setSaveSuccess(true);
-      setApiKey(''); // Clear the input after saving
-      await fetchComputer(); // Refresh to get updated config
+      setApiKey('');
       setTimeout(() => setSaveSuccess(false), 2000);
+    } else {
+      setSaveError('Failed to save configuration');
     }
     
     setIsSaving(false);
   };
 
+  const handleStart = async () => {
+    play('click');
+    const success = await startComputer();
+    if (success) {
+      play('open');
+    } else {
+      play('error');
+    }
+  };
+
+  const handleStop = async () => {
+    play('click');
+    const success = await stopComputer();
+    if (success) {
+      play('close');
+    } else {
+      play('error');
+    }
+  };
+
+  const handleOpenBrowser = () => {
+    if (!computer) return;
+    play('open');
+    openWindow('browser', { agentId: computer.id, title: 'Browser' });
+  };
+
+  const handleOpenTerminal = () => {
+    if (!computer) return;
+    play('open');
+    openWindow('terminal', { agentId: computer.id, title: 'Terminal' });
+  };
+
+  const handleOpenChat = () => {
+    if (!computer) return;
+    play('open');
+    openWindow('chat', { agentId: computer.id, title: 'Construct Agent' });
+  };
+
+  const isRunning = computer?.status === 'running';
+  const isStarting = computer?.status === 'starting';
+  const isStopping = computer?.status === 'stopping';
+  const hasError = computer?.status === 'error';
+
   return (
     <div className="flex flex-col h-full bg-[var(--color-surface)] overflow-auto">
       <div className="p-4 space-y-4">
-        <h2 className="text-lg font-medium">Settings</h2>
-        
+        {/* Computer Status Section */}
+        <div className="border border-[var(--color-border)] rounded-lg p-4 bg-[var(--color-surface-raised)]">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-[var(--color-text-muted)] flex items-center gap-2">
+              <Cpu className="w-4 h-4" />
+              My Computer
+            </h3>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                play('click');
+                fetchComputer();
+              }}
+              disabled={isLoading}
+            >
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
+
+          {/* Error message */}
+          {error && (
+            <div className="p-2 text-sm rounded-lg bg-[var(--color-error-muted)] text-[var(--color-error)] mb-3">
+              {error}
+            </div>
+          )}
+
+          {isLoading && !computer ? (
+            <div className="flex items-center justify-center py-6 text-[var(--color-text-muted)]">
+              <Loader2 className="w-5 h-5 animate-spin mr-2" />
+              <span className="text-sm">Loading...</span>
+            </div>
+          ) : computer ? (
+            <div className="space-y-3">
+              {/* Status card */}
+              <div className="flex items-start justify-between">
+                <div>
+                  <h4 className="font-medium text-sm">{computer.name}</h4>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                    {computer.description || 'Your personal AI computer'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {isRunning ? (
+                    <Wifi className="w-4 h-4 text-[var(--color-success)]" />
+                  ) : (
+                    <WifiOff className="w-4 h-4 text-[var(--color-text-muted)]" />
+                  )}
+                  <span
+                    className={`px-2 py-1 text-xs rounded-full ${
+                      isRunning
+                        ? 'bg-[var(--color-success-muted)] text-[var(--color-success)]'
+                        : isStarting || isStopping
+                        ? 'bg-[var(--color-warning-muted)] text-[var(--color-warning)]'
+                        : hasError
+                        ? 'bg-[var(--color-error-muted)] text-[var(--color-error)]'
+                        : 'bg-[var(--color-surface)] text-[var(--color-text-muted)]'
+                    }`}
+                  >
+                    {computer.status}
+                  </span>
+                </div>
+              </div>
+
+              {/* Agent info */}
+              {computer.config && (
+                <div className="pt-2 border-t border-[var(--color-border)] text-xs text-[var(--color-text-muted)]">
+                  <div className="flex items-center gap-4">
+                    <span>Agent: {computer.config.identityName || 'BoneClaw'}</span>
+                    <span>Model: {computer.config.model}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Power controls */}
+              <div className="flex gap-2">
+                {isRunning ? (
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={handleStop}
+                    disabled={isStopping}
+                  >
+                    {isStopping ? (
+                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                    ) : (
+                      <Square className="w-4 h-4 mr-1" />
+                    )}
+                    {isStopping ? 'Stopping...' : 'Stop'}
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={handleStart}
+                    disabled={isStarting}
+                  >
+                    {isStarting ? (
+                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                    ) : (
+                      <Play className="w-4 h-4 mr-1" />
+                    )}
+                    {isStarting ? 'Starting...' : 'Start'}
+                  </Button>
+                )}
+              </div>
+
+              {/* Quick actions (only when running) */}
+              {isRunning && (
+                <div className="pt-3 border-t border-[var(--color-border)]">
+                  <h4 className="text-xs font-medium text-[var(--color-text-muted)] mb-2">Quick Actions</h4>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="flex-col h-auto py-3"
+                      onClick={handleOpenBrowser}
+                    >
+                      <Monitor className="w-5 h-5 mb-1" />
+                      <span className="text-xs">Browser</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="flex-col h-auto py-3"
+                      onClick={handleOpenTerminal}
+                    >
+                      <Terminal className="w-5 h-5 mb-1" />
+                      <span className="text-xs">Terminal</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="flex-col h-auto py-3"
+                      onClick={handleOpenChat}
+                    >
+                      <MessageSquare className="w-5 h-5 mb-1" />
+                      <span className="text-xs">Agent</span>
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Resources */}
+              <div className="pt-3 border-t border-[var(--color-border)]">
+                <div className="flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
+                  <div className="flex items-center gap-1.5">
+                    <HardDrive className="w-3.5 h-3.5" />
+                    <span>20 GB</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Cpu className="w-3.5 h-3.5" />
+                    <span>1 GB RAM</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-6 text-[var(--color-text-muted)]">
+              <p className="text-sm">Failed to load computer. Try refreshing.</p>
+            </div>
+          )}
+        </div>
+
         {/* AI Configuration */}
         <div className="border border-[var(--color-border)] rounded-lg p-4 bg-[var(--color-surface-raised)]">
           <h3 className="text-sm font-medium text-[var(--color-text-muted)] mb-3 flex items-center gap-2">
@@ -75,15 +338,37 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
           <div className="space-y-3">
             {/* OpenRouter API Key */}
             <div>
-              <Label className="text-xs mb-1 block">OpenRouter API Key</Label>
+              <div className="flex items-center justify-between mb-1">
+                <Label className="text-xs">OpenRouter API Key</Label>
+                {configChecked && (
+                  <span
+                    className={`flex items-center gap-1 text-[11px] ${
+                      hasApiKey
+                        ? 'text-[var(--color-success)]'
+                        : 'text-[var(--color-text-muted)]'
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        hasApiKey ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-muted)]'
+                      }`}
+                    />
+                    {hasApiKey ? 'Key set' : 'Not configured'}
+                  </span>
+                )}
+              </div>
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <Key className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
                   <Input
-                    type="password"
+                    type="text"
+                    autoComplete="off"
+                    data-1p-ignore
+                    data-lpignore="true"
+                    spellCheck={false}
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={computer?.config?.model ? '••••••••••••••••' : 'sk-or-...'}
+                    placeholder={hasApiKey ? '••••••••••••••••' : 'sk-or-...'}
                     className="pl-8 text-sm"
                   />
                 </div>
@@ -117,6 +402,11 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
               </select>
             </div>
             
+            {/* Validation / save error */}
+            {saveError && (
+              <p className="text-xs text-[var(--color-error)]">{saveError}</p>
+            )}
+
             {/* Save Button */}
             <Button
               size="sm"
@@ -141,6 +431,87 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
             </Button>
           </div>
         </div>
+        
+        {/* Google Drive */}
+        {driveSync.isConfigured && (
+          <div className="border border-[var(--color-border)] rounded-lg p-4 bg-[var(--color-surface-raised)]">
+            <h3 className="text-sm font-medium text-[var(--color-text-muted)] mb-3 flex items-center gap-2">
+              <Cloud className="w-4 h-4" />
+              Google Drive
+            </h3>
+            {driveSync.status.connected ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
+                      <p className="text-xs font-medium">Connected</p>
+                    </div>
+                    {driveSync.status.email && (
+                      <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{driveSync.status.email}</p>
+                    )}
+                    {driveSync.status.lastSync && (
+                      <p className="text-[11px] text-[var(--color-text-subtle)] mt-0.5">
+                        Last sync: {new Date(driveSync.status.lastSync).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={driveSync.sync}
+                    disabled={driveSync.isSyncing}
+                    className="flex-1"
+                  >
+                    {driveSync.isSyncing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                        Syncing...
+                      </>
+                    ) : (
+                      'Sync Now'
+                    )}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    onClick={driveSync.disconnect}
+                  >
+                    <Unplug className="w-4 h-4" />
+                  </Button>
+                </div>
+                {driveSync.lastReport && (
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    {driveSync.lastReport.downloaded.length} downloaded, {driveSync.lastReport.uploaded.length} uploaded
+                    {driveSync.lastReport.conflicts.length > 0 && `, ${driveSync.lastReport.conflicts.length} conflicts`}
+                  </p>
+                )}
+                {driveSync.error && (
+                  <p className="text-xs text-red-400">{driveSync.error}</p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Connect your Google Drive to sync files between your workspace and the cloud.
+                </p>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={driveSync.connect}
+                  className="w-full"
+                >
+                  Connect Google Drive
+                </Button>
+                {driveSync.error && (
+                  <p className="text-xs text-red-400">{driveSync.error}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         
         <Separator />
       

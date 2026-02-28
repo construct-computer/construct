@@ -5,7 +5,6 @@ export type WindowType =
   | 'editor' 
   | 'chat' 
   | 'settings' 
-  | 'computer'
   | 'about'
   | 'setup';
 

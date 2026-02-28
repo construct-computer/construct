@@ -21,7 +21,7 @@ interface DockItemConfig {
 }
 
 const dockItems: DockItemConfig[] = [
-  { id: 'computer', label: 'My Computer', icon: iconComputer, windowType: 'computer' },
+  { id: 'computer', label: 'My Computer', icon: iconComputer, windowType: 'settings' },
   { id: 'chat', label: 'Construct Agent', icon: iconChat, windowType: 'chat' },
   { id: 'browser', label: 'Browser', icon: iconBrowser, windowType: 'browser' },
   { id: 'terminal', label: 'Terminal', icon: iconTerminal, windowType: 'terminal' },

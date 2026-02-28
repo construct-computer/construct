@@ -46,6 +46,16 @@ export interface Session {
   expiresAt: number;
 }
 
+export interface DriveToken {
+  userId: string;
+  accessToken: string;
+  refreshToken: string;
+  expiry: string;
+  email: string | null;
+  folderId: string | null;
+  lastSync: string | null;
+}
+
 // SQL schema for SQLite
 export const SQL_SCHEMA = `
 -- Users table
@@ -74,7 +84,7 @@ CREATE TABLE IF NOT EXISTS agents (
 CREATE TABLE IF NOT EXISTS agent_configs (
   agent_id TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
   openrouter_key_encrypted TEXT NOT NULL,
-  model TEXT NOT NULL DEFAULT 'nvidia/nemotron-nano-9b-v2:free',
+  model TEXT NOT NULL DEFAULT 'nvidia/nemotron-3-nano-30b-a3b:free',
   goals TEXT DEFAULT '[]',
   schedules TEXT DEFAULT '[]',
   identity_name TEXT DEFAULT 'BoneClaw Agent',
@@ -88,6 +98,17 @@ CREATE TABLE IF NOT EXISTS activity_logs (
   timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
   event_type TEXT NOT NULL,
   event_data TEXT DEFAULT '{}'
+);
+
+-- Google Drive tokens table
+CREATE TABLE IF NOT EXISTS drive_tokens (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  access_token TEXT NOT NULL,
+  refresh_token TEXT NOT NULL,
+  expiry TEXT NOT NULL,
+  email TEXT,
+  folder_id TEXT,
+  last_sync TEXT
 );
 
 -- Create indexes

@@ -252,7 +252,7 @@ export const useComputerStore = create<ComputerStore>()(
           createdAt: instance.createdAt,
           updatedAt: instance.createdAt,
           config: {
-            model: 'nvidia/nemotron-nano-9b-v2:free',
+            model: 'nvidia/nemotron-3-nano-30b-a3b:free',
             goals: [],
             schedules: [],
             identityName: 'BoneClaw Agent',

@@ -12,3 +12,5 @@ export {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from './dropdown-menu';
+export { ErrorBoundary } from './ErrorBoundary';
+export { Toasts } from './Toasts';
