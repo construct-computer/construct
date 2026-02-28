@@ -26,6 +26,7 @@ interface EditorStore {
   saveFile: (filePath: string) => Promise<void>;
   getTab: (filePath: string) => EditorTab | undefined;
   getActiveTab: () => EditorTab | undefined;
+  clearAllTabs: () => void;
 }
 
 function extractFileName(filePath: string): string {

@@ -347,7 +347,7 @@ function InlineNameInput({
 
 // ─── Main component ────────────────────────────────────────────────────────
 
-export function FilesWindow({ config }: FilesWindowProps) {
+export function FilesWindow({ config: _config }: FilesWindowProps) {
   const instanceId = useComputerStore((s) => s.instanceId);
   const [activeTab, setActiveTab] = useState<'local' | 'cloud'>('local');
   const [currentPath, setCurrentPath] = useState(WORKSPACE_PATH);

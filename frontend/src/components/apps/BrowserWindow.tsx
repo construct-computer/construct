@@ -124,7 +124,7 @@ export function BrowserWindow({ config: _config }: BrowserWindowProps) {
       </div>
 
       {/* Browser content */}
-      <div className="flex-1 min-h-0 overflow-hidden bg-black relative flex items-center justify-center">
+      <div className="flex-1 min-h-0 overflow-hidden bg-neutral-800 relative flex items-center justify-center">
         {frameSrc ? (
           <img
             src={frameSrc}

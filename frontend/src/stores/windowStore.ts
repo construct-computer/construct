@@ -54,11 +54,13 @@ const windowDefaults: Record<WindowType, Partial<WindowConfig>> = {
   browser: {
     title: 'Browser',
     width: 960,
-    height: 620,  // ~540 content (16:9) + ~80 chrome (titlebar+navbar+statusbar)
+    height: 651,  // 540 content (16:9 at 960w) + 111 chrome
     minWidth: 400,
-    minHeight: 305,
+    minHeight: 336, // 225 content (16:9 at 400w) + 111 chrome
     maxWidth: 1920,
-    maxHeight: 1200,
+    maxHeight: 1191, // 1080 content (16:9 at 1920w) + 111 chrome
+    aspectRatio: 16 / 9,
+    chromeHeight: 111, // titlebar(32) + tabbar(23) + navbar(33) + statusbar(23)
   },
   terminal: {
     title: 'Terminal',
@@ -236,6 +238,8 @@ export const useWindowStore = create<WindowStore>()(
         minHeight: options.minHeight ?? defaults.minHeight ?? MIN_WINDOW_HEIGHT,
         maxWidth: options.maxWidth ?? defaults.maxWidth,
         maxHeight: options.maxHeight ?? defaults.maxHeight,
+        aspectRatio: options.aspectRatio ?? defaults.aspectRatio,
+        chromeHeight: options.chromeHeight ?? defaults.chromeHeight,
         state: 'normal',
         zIndex: nextZIndex,
         agentId: options.agentId,

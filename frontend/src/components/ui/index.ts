@@ -14,3 +14,4 @@ export {
 } from './dropdown-menu';
 export { ErrorBoundary } from './ErrorBoundary';
 export { Toasts } from './Toasts';
+export { MarkdownRenderer } from './MarkdownRenderer';

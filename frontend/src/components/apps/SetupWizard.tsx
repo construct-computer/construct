@@ -38,7 +38,7 @@ export function SetupWizard({ config, onComplete }: SetupWizardProps) {
   
   // Pricing state — maps model ID to info (or null if not found)
   const [pricingMap, setPricingMap] = useState<Map<string, OpenRouterModelInfo | null>>(new Map());
-  const [pricingLoading, setPricingLoading] = useState(false);
+  const [_pricingLoading, setPricingLoading] = useState(false);
 
   const updateComputer = useComputerStore((s) => s.updateComputer);
 

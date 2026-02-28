@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Send, Bot, User, Loader2, Globe, Terminal, FileText, Monitor, Wrench } from 'lucide-react';
-import { Button, Input } from '@/components/ui';
+import { Button, Input, MarkdownRenderer } from '@/components/ui';
 import { useComputerStore, type ChatMessage } from '@/stores/agentStore';
 import { agentWS } from '@/services/websocket';
 import { useSound } from '@/hooks/useSound';
@@ -138,7 +138,7 @@ export function ChatWindow({ config: _config }: ChatWindowProps) {
                     : 'bg-[var(--color-surface-raised)] border border-[var(--color-border)]'
                 }`}
               >
-                <p className="whitespace-pre-wrap">{msg.content}</p>
+                <MarkdownRenderer content={msg.content} plain={msg.role === 'user'} />
                 <p className={`text-xs mt-1 ${msg.role === 'user' ? 'opacity-70' : 'text-[var(--color-text-muted)]'}`}>
                   {msg.timestamp.toLocaleTimeString()}
                 </p>

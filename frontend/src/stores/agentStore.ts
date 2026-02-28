@@ -183,6 +183,7 @@ interface ComputerStore {
   unsubscribeFromComputer: () => void;
   
   // Chat
+  loadChatHistory: () => Promise<void>;
   sendChatMessage: (content: string) => void;
   
   // Terminal
@@ -352,6 +353,10 @@ export const useComputerStore = create<ComputerStore>()(
       browserWS.connect(instanceId);
       agentWS.connect(instanceId);
       
+      // Load persisted chat history from the container.
+      // This runs async; messages are prepended before any WS-delivered messages.
+      get().loadChatHistory();
+      
       // Fetch desktop state via REST as a fallback sync.
       // The agent WS also sends desktop_state on connect, but the REST call
       // covers the case where the agent WS isn't connected to the container yet.
@@ -486,6 +491,49 @@ export const useComputerStore = create<ComputerStore>()(
       });
     },
     
+    loadChatHistory: async () => {
+      const { instanceId } = get();
+      if (!instanceId) return;
+
+      try {
+        const result = await api.getAgentHistory(instanceId);
+        if (!result.success) {
+          console.warn('[Store] Failed to load chat history:', result.error);
+          return;
+        }
+
+        const { messages } = result.data;
+        if (!messages || messages.length === 0) return;
+
+        // Map boneclaw messages (system/user/assistant/tool) to frontend ChatMessages.
+        // Only keep user and assistant messages — system prompts and tool results
+        // are internal details, not useful in the chat UI.
+        const history: ChatMessage[] = [];
+        for (const msg of messages) {
+          if (msg.role === 'user' && msg.content) {
+            const content = typeof msg.content === 'string'
+              ? msg.content
+              : String(msg.content);
+            history.push({ role: 'user', content, timestamp: new Date(0) });
+          } else if (msg.role === 'assistant' && msg.content) {
+            const content = typeof msg.content === 'string'
+              ? msg.content
+              : String(msg.content);
+            history.push({ role: 'agent', content, timestamp: new Date(0) });
+          }
+        }
+
+        if (history.length === 0) return;
+
+        // Prepend history before any messages that may have arrived via WS
+        const { chatMessages } = get();
+        set({ chatMessages: [...history, ...chatMessages] });
+        console.log(`[Store] Loaded ${history.length} messages from chat history`);
+      } catch (err) {
+        console.warn('[Store] Error loading chat history:', err);
+      }
+    },
+
     sendChatMessage: (content) => {
       const { instanceId, chatMessages } = get();
       if (!instanceId) return;

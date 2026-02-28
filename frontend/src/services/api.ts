@@ -204,6 +204,16 @@ export async function getAgentConfigStatus(instanceId: string): Promise<ApiResul
 }
 
 /**
+ * Load conversation history from the agent (persisted inside the container).
+ */
+export async function getAgentHistory(instanceId: string, sessionKey = 'ws_default'): Promise<ApiResult<{
+  session_key: string;
+  messages: Array<{ role: string; content: string | null }>;
+}>> {
+  return request(`/instances/${instanceId}/agent/history?session_key=${encodeURIComponent(sessionKey)}`);
+}
+
+/**
  * Validate an OpenRouter API key by calling their auth endpoint.
  * Returns { valid: true } on success, or { valid: false, error } on failure.
  */

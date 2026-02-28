@@ -35,7 +35,7 @@ function App() {
   const [rebootStatus, setRebootStatus] = useState<RebootStatus>('stopping');
   const [rebootError, setRebootError] = useState<string | null>(null);
 
-  const { isAuthenticated, isLoading: authLoading, logout, checkAuth } = useAuthStore();
+  const { isAuthenticated, isLoading: _authLoading, logout, checkAuth } = useAuthStore();
   const { isConnected } = useWebSocket();
 
   const computer = useComputerStore((s) => s.computer);

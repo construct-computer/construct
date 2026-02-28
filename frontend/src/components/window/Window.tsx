@@ -161,6 +161,49 @@ export function Window({ config, children }: WindowProps) {
           }
         }
         
+        // Enforce aspect ratio constraint on the content area
+        if (config.aspectRatio && config.lockAspectRatio) {
+          const chrome = config.chromeHeight ?? 0;
+          const ratio = config.aspectRatio;
+          const hasH = handle.includes('n') || handle.includes('s');
+          const hasW = handle.includes('e') || handle.includes('w');
+          
+          if (hasW && !hasH) {
+            // Horizontal edge only: derive height from width
+            const contentH = newWidth / ratio;
+            newHeight = Math.round(contentH + chrome);
+          } else if (hasH && !hasW) {
+            // Vertical edge only: derive width from height
+            const contentH = newHeight - chrome;
+            newWidth = Math.round(contentH * ratio);
+          } else {
+            // Corner handle: use the axis with the larger relative delta to drive
+            const absDx = Math.abs(dx);
+            const absDy = Math.abs(dy);
+            if (absDx >= absDy) {
+              // Width drives
+              const contentH = newWidth / ratio;
+              newHeight = Math.round(contentH + chrome);
+            } else {
+              // Height drives
+              const contentH = newHeight - chrome;
+              newWidth = Math.round(contentH * ratio);
+            }
+          }
+          
+          // Re-clamp after aspect ratio adjustment
+          newWidth = Math.max(config.minWidth, Math.min(newWidth, config.maxWidth ?? Infinity));
+          newHeight = Math.max(config.minHeight, Math.min(newHeight, config.maxHeight ?? Infinity));
+          
+          // Adjust position for n/w handles so the opposite edge stays anchored
+          if (handle.includes('w')) {
+            newX = startBounds.x + startBounds.width - newWidth;
+          }
+          if (handle.includes('n')) {
+            newY = startBounds.y + startBounds.height - newHeight;
+          }
+        }
+        
         setBounds(config.id, { x: newX, y: newY, width: newWidth, height: newHeight });
       }
     };
@@ -179,7 +222,7 @@ export function Window({ config, children }: WindowProps) {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [config.id, config.minWidth, config.minHeight, config.width, moveWindow, setBounds]);
+  }, [config.id, config.minWidth, config.minHeight, config.maxWidth, config.maxHeight, config.aspectRatio, config.chromeHeight, config.width, moveWindow, setBounds]);
   
   // Handle window close (animate out, then remove)
   const handleClose = useCallback(() => {

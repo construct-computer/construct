@@ -40,6 +40,15 @@ export interface WindowConfig {
   maxWidth?: number;
   maxHeight?: number;
   
+  // Aspect ratio constraint for the content area (width / height).
+  // Only enforced during resize when lockAspectRatio is true.
+  aspectRatio?: number;
+  // Height of window chrome (titlebar + toolbars) to subtract when computing
+  // content area for aspect ratio enforcement.
+  chromeHeight?: number;
+  // When true, resizing maintains the aspectRatio for the content area.
+  lockAspectRatio?: boolean;
+  
   // State
   state: WindowState;
   zIndex: number;
