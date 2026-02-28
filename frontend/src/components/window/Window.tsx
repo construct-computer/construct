@@ -204,6 +204,33 @@ export function Window({ config, children }: WindowProps) {
           }
         }
         
+        // Clamp to screen boundaries — prevent resizing outside the desktop area
+        const areaWidth = window.innerWidth;
+        const areaHeight = window.innerHeight - MENUBAR_HEIGHT;
+
+        // Right / bottom edges
+        if (newX + newWidth > areaWidth) {
+          if (handle.includes('e')) newWidth = areaWidth - newX;
+          else newX = areaWidth - newWidth; // west handle: anchor right edge
+        }
+        if (newY + newHeight > areaHeight) {
+          if (handle.includes('s')) newHeight = areaHeight - newY;
+          else newY = areaHeight - newHeight; // north handle: anchor bottom edge
+        }
+        // Left / top edges
+        if (newX < 0) {
+          if (handle.includes('w')) { newWidth += newX; newX = 0; }
+          else newX = 0;
+        }
+        if (newY < 0) {
+          if (handle.includes('n')) { newHeight += newY; newY = 0; }
+          else newY = 0;
+        }
+
+        // Re-enforce minimums after boundary clamping
+        newWidth = Math.max(config.minWidth, newWidth);
+        newHeight = Math.max(config.minHeight, newHeight);
+
         setBounds(config.id, { x: newX, y: newY, width: newWidth, height: newHeight });
       }
     };
@@ -289,7 +316,6 @@ export function Window({ config, children }: WindowProps) {
         onMinimize={handleMinimize}
         onMaximize={handleMaximize}
         onClose={handleClose}
-        onDoubleClick={handleMaximize}
         onMouseDown={handleDragStart}
       />
       

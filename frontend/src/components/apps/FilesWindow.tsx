@@ -135,6 +135,13 @@ function isPreviewable(name: string): boolean {
   return cat === 'image' || cat === 'audio' || cat === 'video' || cat === 'pdf';
 }
 
+const HTML_EXTENSIONS = new Set(['html', 'htm']);
+
+function isHtmlFile(name: string): boolean {
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  return HTML_EXTENSIONS.has(ext);
+}
+
 function joinPath(base: string, name: string): string {
   if (base === '/') return `/${name}`;
   return `${base}/${name}`;
@@ -349,6 +356,7 @@ function InlineNameInput({
 
 export function FilesWindow({ config: _config }: FilesWindowProps) {
   const instanceId = useComputerStore((s) => s.instanceId);
+  const navigateBrowser = useComputerStore((s) => s.navigateTo);
   const [activeTab, setActiveTab] = useState<'local' | 'cloud'>('local');
   const [currentPath, setCurrentPath] = useState(WORKSPACE_PATH);
   const [rawEntries, setRawEntries] = useState<FileEntry[]>([]);
@@ -555,7 +563,11 @@ export function FilesWindow({ config: _config }: FilesWindowProps) {
       }
       if (entry.type === 'file') {
         const fullPath = joinPath(currentPath, entry.name);
-        if (isPreviewable(entry.name)) {
+        if (isHtmlFile(entry.name)) {
+          // Open HTML files in the local browser via file:// URL
+          navigateBrowser(`file://${fullPath}`);
+          ensureWindowOpen('browser');
+        } else if (isPreviewable(entry.name)) {
           openPreview(entry.name, fullPath);
         } else if (isTextFile(entry.name)) {
           openFile(fullPath);
@@ -563,7 +575,7 @@ export function FilesWindow({ config: _config }: FilesWindowProps) {
         }
       }
     },
-    [currentPath, navigateTo, openFile, ensureWindowOpen, renamingName, openPreview],
+    [currentPath, navigateTo, navigateBrowser, openFile, ensureWindowOpen, renamingName, openPreview],
   );
 
   // ─── Context menu handlers ──────────────────────────────────────────────

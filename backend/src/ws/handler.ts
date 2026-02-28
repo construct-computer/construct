@@ -6,6 +6,7 @@ import {
   instances, browserClient, terminalServer, agentClient, containerManager,
   addDesktopWindow, removeDesktopWindow, getDesktopWindows, toolToWindowType, desktopActionToWindowType,
   updateBrowserCache, browserStateCache,
+  tinyfishStateCache, updateTinyfishCache, updateTinyfishProgress, clearTinyfishCache,
   type DesktopWindowType,
 } from '../services'
 import type { AgentEvent } from '../agent-client'
@@ -296,6 +297,25 @@ export const wsRoutes = new Elysia()
         } catch {}
       }
 
+      // Replay cached TinyFish state so the frontend restores the streaming overlay
+      const tf = tinyfishStateCache.get(instanceId)
+      if (tf) {
+        try {
+          ws.send(JSON.stringify({
+            type: 'tinyfish:streaming_url',
+            timestamp: Date.now(),
+            data: { streamingUrl: tf.streamingUrl },
+          }))
+          if (tf.lastProgress) {
+            ws.send(JSON.stringify({
+              type: 'tinyfish:progress',
+              timestamp: Date.now(),
+              data: { purpose: tf.lastProgress },
+            }))
+          }
+        } catch {}
+      }
+
       const eventCallback = (event: AgentEvent) => {
         try { ws.send(JSON.stringify(event)) } catch {}
 
@@ -324,6 +344,17 @@ export const wsRoutes = new Elysia()
               if (actionType) addDesktopWindow(instanceId, actionType)
             }
           }
+        }
+
+        // Cache TinyFish state so new frontend connections get the streaming overlay
+        if (event.type === 'tinyfish:streaming_url') {
+          const streamingUrl = event.data?.streamingUrl as string
+          if (streamingUrl) updateTinyfishCache(instanceId, streamingUrl)
+        } else if (event.type === 'tinyfish:progress') {
+          const purpose = event.data?.purpose as string
+          if (purpose) updateTinyfishProgress(instanceId, purpose)
+        } else if (event.type === 'tinyfish:complete' || event.type === 'tinyfish:error') {
+          clearTinyfishCache(instanceId)
         }
       }
 
@@ -367,6 +398,9 @@ export const wsRoutes = new Elysia()
         } else if (msg.type === 'abort') {
           // Frontend requested to stop the agent's current run
           agentClient.abortRun(instanceId).catch(() => {})
+        } else if (msg.type === 'window_open' && typeof msg.windowType === 'string') {
+          // Frontend opened a window — add it to persisted desktop state
+          addDesktopWindow(instanceId, msg.windowType as DesktopWindowType)
         } else if (msg.type === 'window_close' && typeof msg.windowType === 'string') {
           // Frontend closed a window — remove it from persisted desktop state
           removeDesktopWindow(instanceId, msg.windowType as DesktopWindowType)

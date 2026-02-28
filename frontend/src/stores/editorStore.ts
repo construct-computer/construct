@@ -19,6 +19,10 @@ interface EditorStore {
   activeTabPath: string | null;
 
   openFile: (filePath: string) => void;
+  /** Re-fetch a file's content from the container. Always overwrites local content. */
+  refreshFile: (filePath: string) => void;
+  /** Open a file if not already open, or refresh it if already open (for external edits). */
+  openOrRefreshFile: (filePath: string) => void;
   closeTab: (filePath: string) => void;
   setActiveTab: (filePath: string) => void;
   updateContent: (filePath: string, content: string) => void;
@@ -106,6 +110,43 @@ export const useEditorStore = create<EditorStore>()(
           });
         }
       });
+    },
+
+    refreshFile: (filePath: string) => {
+      const instanceId = useComputerStore.getState().instanceId;
+      if (!instanceId) return;
+
+      const tab = get().tabs.find((t) => t.filePath === filePath);
+      if (!tab) return;
+
+      api.readFile(instanceId, filePath).then((result) => {
+        const currentTabs = get().tabs;
+        if (!currentTabs.find((t) => t.filePath === filePath)) return;
+
+        if (result.success) {
+          // Only update if the server content actually changed
+          const existing = currentTabs.find((t) => t.filePath === filePath);
+          if (existing && existing.savedContent === result.data.content) return;
+
+          set({
+            tabs: currentTabs.map((t) =>
+              t.filePath === filePath
+                ? { ...t, content: result.data.content, savedContent: result.data.content }
+                : t,
+            ),
+          });
+        }
+      });
+    },
+
+    openOrRefreshFile: (filePath: string) => {
+      const existing = get().tabs.find((t) => t.filePath === filePath);
+      if (existing) {
+        set({ activeTabPath: filePath });
+        get().refreshFile(filePath);
+      } else {
+        get().openFile(filePath);
+      }
     },
 
     closeTab: (filePath: string) => {
@@ -199,5 +240,42 @@ useWindowStore.subscribe(
     if (!hasEditor && useEditorStore.getState().tabs.length > 0) {
       useEditorStore.getState().clearAllTabs();
     }
+  },
+);
+
+// ── Live file polling ──────────────────────────────────────────────────────
+// Poll the active tab every 3 seconds for external changes.
+// Only updates if the tab is clean (no unsaved local edits) to avoid
+// overwriting user work-in-progress. Agent-initiated refreshes (via
+// openOrRefreshFile) always overwrite, regardless of dirty state.
+
+let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+function startPolling() {
+  if (pollInterval) return;
+  pollInterval = setInterval(() => {
+    const { tabs, activeTabPath } = useEditorStore.getState();
+    if (!activeTabPath) return;
+    const tab = tabs.find((t) => t.filePath === activeTabPath);
+    if (!tab || tab.loading || tab.saving) return;
+    // Only auto-refresh clean tabs to avoid overwriting user edits
+    if (tab.content !== tab.savedContent) return;
+    useEditorStore.getState().refreshFile(activeTabPath);
+  }, 3000);
+}
+
+function stopPolling() {
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
+}
+
+// Start/stop polling based on whether tabs are open
+useEditorStore.subscribe(
+  (s) => s.tabs.length,
+  (count) => {
+    if (count > 0) startPolling();
+    else stopPolling();
   },
 );

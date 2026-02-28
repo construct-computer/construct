@@ -5,6 +5,7 @@ import type { SessionInfo } from '@/services/api';
 import { browserWS, terminalWS, agentWS, type AgentEvent } from '@/services/websocket';
 import type { AgentWithConfig, WindowType } from '@/types';
 import { useWindowStore } from './windowStore';
+import { useEditorStore } from './editorStore';
 import { useNotificationStore } from './notificationStore';
 
 export type ChatMessageRole = 'user' | 'agent' | 'activity';
@@ -1108,6 +1109,25 @@ export const useComputerStore = create<ComputerStore>()(
               tinyfishStreamUrl: null,
             } as BrowserState,
           });
+          break;
+        }
+        
+        // File system events — open/refresh files in the editor
+        case 'fs:read': {
+          const path = event.data?.path as string;
+          if (path) {
+            useWindowStore.getState().ensureWindowOpen('editor');
+            useEditorStore.getState().openOrRefreshFile(path);
+          }
+          break;
+        }
+        case 'fs:write':
+        case 'fs:edit': {
+          const path = event.data?.path as string;
+          if (path) {
+            useWindowStore.getState().ensureWindowOpen('editor');
+            useEditorStore.getState().openOrRefreshFile(path);
+          }
           break;
         }
         

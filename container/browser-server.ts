@@ -196,58 +196,14 @@ const NEW_TAB_HTML = `data:text/html,${encodeURIComponent(`<!DOCTYPE html>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
-  background: #000; min-height: 100vh; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; color: #fff; overflow: hidden;
+  background: #0a0a0a; min-height: 100vh; display: flex;
+  align-items: center; justify-content: center; color: #fff;
 }
-.container { text-align: center; padding: 40px; position: relative; z-index: 1; }
-.logo { width: 48px; height: 48px; margin: 0 auto 28px; opacity: 0.5; }
-.logo svg { width: 100%; height: 100%; }
-h1 { font-size: 20px; font-weight: 400; letter-spacing: -0.01em; margin-bottom: 6px; color: rgba(255,255,255,0.85); }
-h1 span { font-weight: 600; }
-.subtitle { font-size: 13px; color: rgba(255,255,255,0.3); margin-bottom: 36px; font-weight: 400; }
-.search-box {
-  display: flex; align-items: center; background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
-  padding: 10px 16px; width: 420px; max-width: 90vw; transition: all 0.2s ease;
-}
-.search-box:focus-within { background: rgba(255,255,255,0.09); border-color: rgba(255,255,255,0.15); }
-.search-icon { width: 14px; height: 14px; margin-right: 10px; opacity: 0.3; flex-shrink: 0; }
-.search-input {
-  flex: 1; background: transparent; border: none; outline: none;
-  color: #fff; font-size: 14px; font-family: inherit;
-}
-.search-input::placeholder { color: rgba(255,255,255,0.25); }
-.glow {
-  position: fixed; width: 500px; height: 500px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(255,255,255,0.03) 0%, transparent 70%);
-  top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none;
-}
+p { font-size: 14px; color: rgba(255,255,255,0.25); font-weight: 400; }
 </style>
 </head>
 <body>
-  <div class="glow"></div>
-  <div class="container">
-    <div class="logo">
-      <svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
-      </svg>
-    </div>
-    <h1><span>construct</span>.computer</h1>
-    <p class="subtitle">Your AI-powered cloud workspace</p>
-    <div class="search-box">
-      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-      <input type="text" class="search-input" placeholder="Search or enter URL" autofocus/>
-    </div>
-  </div>
-  <script>
-    const input = document.querySelector('.search-input');
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && input.value.trim()) {
-        const q = input.value.trim();
-        window.location.href = q.includes('.') && !q.includes(' ') ? (q.startsWith('http') ? q : 'https://' + q) : 'https://search.brave.com/search?q=' + encodeURIComponent(q);
-      }
-    });
-  </script>
+  <p>Waiting for Construct agent...</p>
 </body></html>`)}`
 
 // ─── agent-browser CLI helper ───────────────────────────────────────────────

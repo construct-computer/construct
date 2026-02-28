@@ -363,6 +363,9 @@ export const useWindowStore = create<WindowStore>()(
         nextZIndex: nextZIndex + 1,
       });
       
+      // Notify backend so this window type is restored on next refresh.
+      agentWS.sendWindowOpen(type);
+      
       return id;
     },
     

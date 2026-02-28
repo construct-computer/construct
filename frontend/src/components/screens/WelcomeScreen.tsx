@@ -1,5 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Power } from 'lucide-react';
 import { useSettingsStore, getWallpaperSrc } from '@/stores/settingsStore';
+import { useSound } from '@/hooks/useSound';
 import logoImg from '@/assets/construct-logo.png';
 
 interface WelcomeScreenProps {
@@ -9,12 +11,18 @@ interface WelcomeScreenProps {
 /**
  * Premium first-boot welcome screen with cinematic transitions.
  *
+ * Phase 0: Power-on — user clicks the power button to begin
  * Phase 1: "hello" — cursive greeting with luminous gradient, rises into view
  * Phase 2: Brand reveal — typographic "construct.computer" with staggered elements
  * Phase 3: Cinematic exit — content lifts away with depth blur, revealing login beneath
  */
 export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
   const wallpaperSrc = getWallpaperSrc(useSettingsStore((s) => s.wallpaperId));
+  const { play } = useSound();
+
+  // Phase 0: Power-on gate
+  const [poweredOn, setPoweredOn] = useState(false);
+  const [powerFading, setPowerFading] = useState(false);
 
   // Phase 1
   const [helloIn, setHelloIn] = useState(false);
@@ -32,42 +40,53 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
   const [exiting, setExiting] = useState(false);
 
   // Mount control
-  const [showHello, setShowHello] = useState(true);
+  const [showHello, setShowHello] = useState(false);
 
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
 
+  // ── Power-on handler ─────────────────────────────────────────────────
+  const handlePowerOn = useCallback(() => {
+    if (poweredOn) return;
+    setTimeout(() => play('startup', 0.5), 1250);
+    setPowerFading(true);
+    // After the power button fades, start the sequence
+    setTimeout(() => {
+      setPoweredOn(true);
+      setShowHello(true);
+    }, 600);
+  }, [poweredOn, play]);
+
+  // ── Animation sequence (starts after power-on) ───────────────────────
   useEffect(() => {
+    if (!poweredOn) return;
+
     const timers: ReturnType<typeof setTimeout>[] = [];
     const t = (fn: () => void, ms: number) => {
       timers.push(setTimeout(fn, ms));
     };
 
-    // ── Phase 1: "hello" ───────────────────────────────
-    t(() => setHelloIn(true), 200);       // rise in
-    t(() => setHelloOut(true), 4000);     // drift out
-    t(() => {                              // swap to phase 2
+    // Phase 1: "hello"
+    t(() => setHelloIn(true), 200);
+    t(() => setHelloOut(true), 4000);
+    t(() => {
       setShowHello(false);
       setShowBrand(true);
     }, 4800);
 
-    // ── Phase 2: Brand reveal ──────────────────────────
-    t(() => setLineIn(true), 4900);       // decorative line draws
-    t(() => setSubtitleIn(true), 5150);   // "Welcome to"
-    t(() => setBrandIn(true), 5400);      // "construct.computer"
-    t(() => setTaglineIn(true), 5850);    // tagline
-
-    // Phase 2 exit
+    // Phase 2: Brand reveal
+    t(() => setLineIn(true), 4900);
+    t(() => setSubtitleIn(true), 5150);
+    t(() => setBrandIn(true), 5400);
+    t(() => setTaglineIn(true), 5850);
     t(() => setBrandOut(true), 8000);
 
-    // ── Phase 3: Cinematic exit ────────────────────────
+    // Phase 3: Cinematic exit
     t(() => setExiting(true), 8800);
-
-    // Done — unmount
     t(() => onCompleteRef.current(), 10000);
 
     return () => timers.forEach(clearTimeout);
-  }, []);
+  }, [poweredOn]);
 
   // Shared easing
   const ease = 'cubic-bezier(0.16, 1, 0.3, 1)'; // expo out
@@ -104,7 +123,7 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
         }}
       />
 
-      {/* Subtle ambient glow — very faint, won't tint the background */}
+      {/* Subtle ambient glow */}
       <div
         className="absolute pointer-events-none"
         style={{
@@ -118,7 +137,27 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
         }}
       />
 
-      {/* ── Phase 1: "hello" — handwriting reveal with flowing gradient ── */}
+      {/* ── Phase 0: Power-on button ── */}
+      {!poweredOn && (
+        <div
+          className="flex flex-col items-center gap-4 relative z-10 select-none"
+          style={{
+            opacity: powerFading ? 0 : 1,
+            transform: powerFading ? 'scale(0.95)' : 'scale(1)',
+            transition: `opacity 0.5s ${ease}, transform 0.5s ${ease}`,
+          }}
+        >
+          <button
+            className="group flex items-center justify-center w-16 h-16 rounded-full border border-white/10 bg-white/5 backdrop-blur-sm hover:bg-white/10 hover:border-white/20 transition-all duration-300"
+            onClick={handlePowerOn}
+          >
+            <Power className="w-6 h-6 text-white/50 group-hover:text-white/80 transition-colors duration-300" />
+          </button>
+          <span className="text-[11px] text-white/25 tracking-widest uppercase">Power on</span>
+        </div>
+      )}
+
+      {/* ── Phase 1: "hello" ── */}
       {showHello && (
         <h1
           className="hello-cursive select-none relative z-10"
@@ -127,8 +166,6 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
             lineHeight: 1,
             letterSpacing: '-0.01em',
             // Starts fully warm (red/orange); green/emerald creeps in from the right.
-            // At 250% width, the initial visible window (0-40%) is pure warm tones.
-            // Animating background-position slides green in from the right edge.
             background: 'linear-gradient(90deg, #EF4444 0%, #FB923C 20%, #EF4444 38%, #FB923C 48%, #C4A030 55%, #39FF14 65%, #00FF66 75%, #39FF14 88%, #00FF66 100%)',
             backgroundSize: '250% 100%',
             WebkitBackgroundClip: 'text',

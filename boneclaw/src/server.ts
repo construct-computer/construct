@@ -57,6 +57,10 @@ function transformEvent(event: AgentEvent): Record<string, unknown> {
     'tinyfish:progress': 'tinyfish:progress',
     'tinyfish:complete': 'tinyfish:complete',
     'tinyfish:error': 'tinyfish:error',
+    // Filesystem events pass through
+    'fs:read': 'fs:read',
+    'fs:write': 'fs:write',
+    'fs:edit': 'fs:edit',
   };
 
   const mappedType = typeMap[type] || type;

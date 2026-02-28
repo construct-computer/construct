@@ -328,6 +328,13 @@ class AgentWSClient {
     }
   }
 
+  /** Notify the backend that the user opened a window so it can be restored on refresh. */
+  sendWindowOpen(windowType: string) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'window_open', windowType }));
+    }
+  }
+
   /** Notify the backend that the user closed a window so it stops being restored on refresh. */
   sendWindowClose(windowType: string) {
     if (this.ws?.readyState === WebSocket.OPEN) {

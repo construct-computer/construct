@@ -48,6 +48,7 @@ export const browserStateCache = new Map<string, CachedBrowserState>()
 export function toolToWindowType(tool: string): DesktopWindowType | null {
   // Handle both MCP-style (browser_*) and boneclaw-style (browser) tool names
   if (tool === 'browser' || tool.startsWith('browser_')) return 'browser'
+  if (tool === 'web_search') return 'browser' // TinyFish opens in browser view
   if (tool === 'exec') return 'terminal'
   if (tool === 'read' || tool === 'write' || tool === 'edit' || tool === 'list') return 'editor'
   if (tool === 'file_read' || tool === 'file_write' || tool === 'file_edit') return 'editor'
@@ -87,6 +88,27 @@ export function getDesktopWindows(instanceId: string): DesktopWindowType[] {
 export function updateBrowserCache(instanceId: string, update: Partial<CachedBrowserState>): void {
   const existing = browserStateCache.get(instanceId) ?? {}
   browserStateCache.set(instanceId, { ...existing, ...update })
+}
+
+// Cache the TinyFish streaming URL per instance so new frontend connections
+// can restore the TinyFish overlay without waiting for boneclaw to re-emit.
+export const tinyfishStateCache = new Map<string, { streamingUrl: string; lastProgress: string | null }>()
+
+/** Update cached TinyFish streaming state for an instance */
+export function updateTinyfishCache(instanceId: string, streamingUrl: string): void {
+  const existing = tinyfishStateCache.get(instanceId)
+  tinyfishStateCache.set(instanceId, { streamingUrl, lastProgress: existing?.lastProgress ?? null })
+}
+
+/** Update cached TinyFish progress for an instance */
+export function updateTinyfishProgress(instanceId: string, progress: string): void {
+  const existing = tinyfishStateCache.get(instanceId)
+  if (existing) existing.lastProgress = progress
+}
+
+/** Clear cached TinyFish state for an instance */
+export function clearTinyfishCache(instanceId: string): void {
+  tinyfishStateCache.delete(instanceId)
 }
 
 // Helper to check instance ownership
