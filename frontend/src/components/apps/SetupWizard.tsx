@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Key, ExternalLink, Loader2, Check, Sparkles, AlertCircle, ChevronRight } from 'lucide-react';
+import { Key, ExternalLink, Loader2, Check, Sparkles, AlertCircle, ChevronRight, Zap } from 'lucide-react';
 import { Button, Input, Label } from '@/components/ui';
 import { useComputerStore } from '@/stores/agentStore';
 import { useWindowStore } from '@/stores/windowStore';
@@ -27,8 +27,9 @@ interface SetupWizardProps {
 
 export function SetupWizard({ config, onComplete }: SetupWizardProps) {
   const closeWindow = useWindowStore((s) => s.closeWindow);
-  const [step, setStep] = useState<'intro' | 'apikey' | 'model' | 'saving'>('intro');
+  const [step, setStep] = useState<'intro' | 'apikey' | 'model' | 'tinyfish' | 'saving'>('intro');
   const [apiKey, setApiKey] = useState('');
+  const [tinyfishKey, setTinyfishKey] = useState('');
   const [model, setModel] = useState('nvidia/nemotron-3-nano-30b-a3b:free');
   const [customModelId, setCustomModelId] = useState('');
   const [showCustom, setShowCustom] = useState(false);
@@ -111,6 +112,7 @@ export function SetupWizard({ config, onComplete }: SetupWizardProps) {
     try {
       const success = await updateComputer({
         openrouterApiKey: apiKey.trim(),
+        tinyfishApiKey: tinyfishKey.trim() || undefined,
         model: effectiveModel,
       });
       
@@ -120,11 +122,11 @@ export function SetupWizard({ config, onComplete }: SetupWizardProps) {
         onComplete?.();
       } else {
         setError('Failed to save configuration. Please try again.');
-        setStep('apikey');
+        setStep('tinyfish');
       }
     } catch {
       setError('An error occurred. Please try again.');
-      setStep('apikey');
+      setStep('tinyfish');
     } finally {
       setIsSaving(false);
     }
@@ -155,7 +157,7 @@ export function SetupWizard({ config, onComplete }: SetupWizardProps) {
               <div>
                 <h2 className="text-base font-semibold leading-tight">Welcome to Your Computer</h2>
                 <p className="text-xs text-[var(--color-text-muted)]">
-                  {step === 'apikey' ? 'Step 1 of 2' : 'Step 2 of 2'}
+                  {step === 'apikey' ? 'Step 1 of 3' : step === 'model' ? 'Step 2 of 3' : 'Step 3 of 3'}
                 </p>
               </div>
             </div>
@@ -332,6 +334,63 @@ export function SetupWizard({ config, onComplete }: SetupWizardProps) {
           </div>
         )}
 
+        {step === 'tinyfish' && (
+          <div className="space-y-4">
+            <div className="bg-[var(--color-surface-raised)] border border-[var(--color-border)] rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center">
+                  <Zap className="w-4 h-4 text-amber-500" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">TinyFish Web Agent</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">Optional — enhanced web scraping</p>
+                </div>
+              </div>
+              <p className="text-sm text-[var(--color-text-muted)]">
+                TinyFish gives your AI agent cloud-powered web scraping that can bypass anti-bot protections, 
+                CAPTCHAs, and Cloudflare. Great for research and data extraction tasks.
+              </p>
+            </div>
+            
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">TinyFish API Key</Label>
+              <div className="relative">
+                <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
+                <Input
+                  type="text"
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  spellCheck={false}
+                  value={tinyfishKey}
+                  onChange={(e) => setTinyfishKey(e.target.value)}
+                  placeholder="sk-tinyfish-..."
+                  className="pl-10"
+                />
+              </div>
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Don't have a key?{' '}
+                <a
+                  href="https://tinyfish.ai"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--color-accent)] hover:underline inline-flex items-center gap-1"
+                >
+                  Get one at TinyFish
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </p>
+            </div>
+
+            {error && (
+              <div className="flex items-center gap-2 text-sm text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                {error}
+              </div>
+            )}
+          </div>
+        )}
+
         {step === 'saving' && (
           <div className="text-center space-y-4">
             <Loader2 className="w-12 h-12 mx-auto text-[var(--color-accent)] animate-spin" />
@@ -416,16 +475,38 @@ export function SetupWizard({ config, onComplete }: SetupWizardProps) {
                 <Button
                   variant="primary"
                   className="flex-1"
+                  disabled={!effectiveModel}
+                  onClick={() => { setError(null); setStep('tinyfish'); }}
+                >
+                  Continue
+                </Button>
+              </div>
+            )}
+
+            {step === 'tinyfish' && (
+              <div className="flex gap-2">
+                <Button
+                  variant="default"
+                  className="flex-1"
+                  onClick={() => setStep('model')}
+                >
+                  Back
+                </Button>
+                <Button
+                  variant="primary"
+                  className="flex-1"
                   onClick={handleSave}
-                  disabled={isSaving || !effectiveModel}
+                  disabled={isSaving}
                 >
                   {isSaving ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       Saving...
                     </>
-                  ) : (
+                  ) : tinyfishKey.trim() ? (
                     'Complete Setup'
+                  ) : (
+                    'Skip & Complete'
                   )}
                 </Button>
               </div>

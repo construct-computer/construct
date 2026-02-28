@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Send, Square, Bot, User, Loader2, Globe, Terminal, FileText, Monitor, Wrench, SquarePen, ChevronDown, Trash2, MessageSquare } from 'lucide-react';
+import { Send, Square, Bot, User, Loader2, Globe, Terminal, FileText, Monitor, Wrench, SquarePen, ChevronDown, Trash2, MessageSquare, Zap } from 'lucide-react';
 import { Button, Input, MarkdownRenderer } from '@/components/ui';
 import { useComputerStore, type ChatMessage } from '@/stores/agentStore';
 import { agentWS } from '@/services/websocket';
@@ -12,6 +12,7 @@ function ActivityIcon({ type }: { type?: ChatMessage['activityType'] }) {
   const cls = "w-3 h-3";
   switch (type) {
     case 'browser': return <Globe className={cls} />;
+    case 'tinyfish': return <Zap className={cls} />;
     case 'terminal': return <Terminal className={cls} />;
     case 'file': return <FileText className={cls} />;
     case 'desktop': return <Monitor className={cls} />;
@@ -324,12 +325,19 @@ export function ChatWindow({ config: _config }: ChatWindowProps) {
 
         {chatMessages.map((msg, index) => {
           if (msg.role === 'activity') {
+            const isTinyfish = msg.activityType === 'tinyfish';
             return (
               <div key={index} className="flex items-center gap-2 px-2 py-1">
-                <div className="w-5 h-5 shrink-0 rounded-full bg-[var(--color-border)] flex items-center justify-center text-[var(--color-text-muted)]">
+                <div className={`w-5 h-5 shrink-0 rounded-full flex items-center justify-center ${
+                  isTinyfish
+                    ? 'bg-amber-500/20 text-amber-500'
+                    : 'bg-[var(--color-border)] text-[var(--color-text-muted)]'
+                }`}>
                   <ActivityIcon type={msg.activityType} />
                 </div>
-                <span className="text-xs text-[var(--color-text-muted)] truncate">
+                <span className={`text-xs truncate ${
+                  isTinyfish ? 'text-amber-400/80' : 'text-[var(--color-text-muted)]'
+                }`}>
                   {msg.content}
                 </span>
                 <span className="text-xs text-[var(--color-text-subtle)] ml-auto shrink-0">

@@ -266,11 +266,14 @@ html.dark ::-webkit-scrollbar-thumb:active {
   text-rendering: optimizeLegibility;
 }
 
-/* Slow-shifting luminous gradient for "hello" text */
+/* Continuous leftward-flowing luminous gradient for "hello" text.
+   With background-size: 200%, the visible area is 50% of the gradient image.
+   Shifting from 0% to -100% moves by exactly one full gradient-image width,
+   which equals two visible widths. Since the gradient contains two identical
+   color cycles, the end state is pixel-identical to the start → seamless loop. */
 @keyframes hello-gradient {
   0%   { background-position: 0% 50%; }
-  50%  { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+  100% { background-position: 100% 50%; }
 }
 
 /* Handwriting reveal — animated mask sweeps left to right with soft pen-tip edge.

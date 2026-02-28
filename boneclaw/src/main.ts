@@ -4,6 +4,7 @@ import { loadConfig, getConfigSummary } from './config';
 import { runAutonomousLoop, runSingleInteraction } from './agent/autonomous';
 import { emit, setBroadcastCallback } from './events/emitter';
 import { startServer, broadcastEvent } from './server';
+import { setTinyfishConfig } from './tools/web_search';
 
 /**
  * Parse command line arguments
@@ -176,6 +177,9 @@ async function main(): Promise<void> {
   if (!config.openrouter.apiKey) {
     process.stderr.write('Warning: OPENROUTER_API_KEY is not set. Agent will start but cannot process messages until configured.\n');
   }
+  
+  // Initialize TinyFish config for the web_search tool
+  setTinyfishConfig(config.tinyfish);
   
   // Log config summary to stderr (stdout is for events)
   process.stderr.write(`Config: ${JSON.stringify(getConfigSummary(config))}\n`);

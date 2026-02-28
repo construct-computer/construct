@@ -1,4 +1,4 @@
-import { RefreshCw, ArrowLeft, ArrowRight, Globe, X } from 'lucide-react';
+import { RefreshCw, ArrowLeft, ArrowRight, Globe, X, Monitor, Zap } from 'lucide-react';
 import { useComputerStore, type BrowserTab } from '@/stores/agentStore';
 import type { WindowConfig } from '@/types';
 
@@ -6,12 +6,20 @@ interface BrowserWindowProps {
   config: WindowConfig;
 }
 
+/** Check whether a tab represents real browsing (not the default New Tab page). */
+function isRealTab(tab: BrowserTab): boolean {
+  if (!tab.url) return false;
+  if (tab.url === 'about:blank') return false;
+  // The container's New Tab page is a data:text/html URL with "New Tab" in it
+  if (tab.url.startsWith('data:text/html')) return false;
+  return true;
+}
+
 function TabItem({ tab, onSwitch, onClose }: { 
   tab: BrowserTab; 
   onSwitch: () => void; 
   onClose: (e: React.MouseEvent) => void;
 }) {
-  // Extract domain from URL for display
   const displayTitle = tab.title || (() => {
     try {
       return new URL(tab.url).hostname || 'New Tab';
@@ -54,34 +62,70 @@ export function BrowserWindow({ config: _config }: BrowserWindowProps) {
 
   const isRunning = computer && computer.status === 'running';
 
-  const url = browserState.url || 'about:blank';
+  const url = browserState.url || '';
   const pageTitle = browserState.title || '';
   const isLoading = browserState.isLoading;
   const connected = browserState.connected;
   const screenshot = browserState.screenshot;
   const tabs = browserState.tabs;
+  const tinyfishStreamUrl = browserState.tinyfishStreamUrl;
 
-  // Show the frame - screenshot is a base64 string from the store.
-  // Detect format: PNG starts with "iVBOR", JPEG with "/9j/". Default to JPEG (stream format).
   const frameSrc = screenshot
     ? `data:image/${screenshot.startsWith('iVBOR') ? 'png' : 'jpeg'};base64,${screenshot}`
     : null;
+
+  // Determine if there's real browsing activity happening
+  const realTabs = tabs.filter(isRealTab);
+  const hasRealContent = realTabs.length > 0 || !!frameSrc;
+  const isActive = hasRealContent || !!tinyfishStreamUrl;
 
   const handleSwitchTab = (tabId: string) => {
     switchTab(tabId);
   };
 
   const handleCloseTab = (e: React.MouseEvent, tabId: string) => {
-    e.stopPropagation(); // Prevent switching to the tab
+    e.stopPropagation();
     closeTab(tabId);
   };
 
+  // Idle state — no real browsing, no TinyFish
+  if (!isActive) {
+    return (
+      <div className="flex flex-col h-full bg-[var(--color-surface)] overflow-hidden">
+        <div className="flex-1 flex items-center justify-center bg-neutral-900">
+          <div className="text-center text-[var(--color-text-muted)] max-w-xs px-6">
+            <Monitor className="w-14 h-14 mx-auto mb-4 opacity-20" />
+            {isRunning ? (
+              <>
+                <p className="text-sm font-medium opacity-70">Browser idle</p>
+                <p className="text-xs mt-2 opacity-40 leading-relaxed">
+                  Your agent will use this window when browsing the web or running TinyFish searches.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-medium opacity-70">Not connected</p>
+                <p className="text-xs mt-2 opacity-40 leading-relaxed">
+                  Start your computer to see browser activity.
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+        {/* Minimal status bar */}
+        <div className="shrink-0 flex items-center justify-end px-2 py-1 text-xs border-t border-[var(--color-border)] bg-[var(--color-surface-raised)] text-[var(--color-text-muted)]">
+          <span>{connected ? 'Connected' : 'Disconnected'}</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-[var(--color-surface)] overflow-hidden">
-      {/* Tab bar */}
-      {tabs.length > 0 && (
+      {/* Tab bar — only show when there are real tabs */}
+      {realTabs.length > 0 && !tinyfishStreamUrl && (
         <div className="shrink-0 flex items-stretch overflow-x-auto bg-[var(--color-surface-raised)] border-b border-[var(--color-border)]">
-          {tabs.map((tab) => (
+          {realTabs.map((tab) => (
             <TabItem
               key={tab.id}
               tab={tab}
@@ -92,72 +136,97 @@ export function BrowserWindow({ config: _config }: BrowserWindowProps) {
         </div>
       )}
 
-      {/* Navigation bar */}
-      <div className="shrink-0 flex items-center gap-1 p-1 border-b border-[var(--color-border)] bg-[var(--color-surface-raised)]">
-        <button
-          className="p-1 rounded-md hover:bg-[var(--color-surface)] disabled:opacity-50"
-          disabled
-          title="Back"
-        >
-          <ArrowLeft className="w-4 h-4" />
-        </button>
-        <button
-          className="p-1 rounded-md hover:bg-[var(--color-surface)] disabled:opacity-50"
-          disabled
-          title="Forward"
-        >
-          <ArrowRight className="w-4 h-4" />
-        </button>
-        <button
-          className={`p-1 rounded-md hover:bg-[var(--color-surface)] ${isLoading ? 'animate-spin' : ''}`}
-          disabled
-          title="Refresh"
-        >
-          <RefreshCw className="w-4 h-4" />
-        </button>
+      {/* Navigation bar — only show when there's real content and not TinyFish */}
+      {!tinyfishStreamUrl && (
+        <div className="shrink-0 flex items-center gap-1 p-1 border-b border-[var(--color-border)] bg-[var(--color-surface-raised)]">
+          <button
+            className="p-1 rounded-md hover:bg-[var(--color-surface)] disabled:opacity-50"
+            disabled
+            title="Back"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <button
+            className="p-1 rounded-md hover:bg-[var(--color-surface)] disabled:opacity-50"
+            disabled
+            title="Forward"
+          >
+            <ArrowRight className="w-4 h-4" />
+          </button>
+          <button
+            className={`p-1 rounded-md hover:bg-[var(--color-surface)] ${isLoading ? 'animate-spin' : ''}`}
+            disabled
+            title="Refresh"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
 
-        {/* URL bar */}
-        <div className="flex-1 flex items-center gap-2 px-2 py-1 text-xs font-mono bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md">
-          <Globe className="w-3 h-3 text-[var(--color-text-muted)] shrink-0" />
-          <span className="truncate text-[var(--color-text-muted)]">{url}</span>
+          {/* URL bar */}
+          <div className="flex-1 flex items-center gap-2 px-2 py-1 text-xs font-mono bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md">
+            <Globe className="w-3 h-3 text-[var(--color-text-muted)] shrink-0" />
+            <span className="truncate text-[var(--color-text-muted)]">{url || 'about:blank'}</span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Browser content */}
       <div className="flex-1 min-h-0 overflow-hidden bg-neutral-800 relative flex items-center justify-center">
-        {frameSrc ? (
+        {/* TinyFish live stream overlay */}
+        {tinyfishStreamUrl ? (
+          <div className="absolute inset-0 z-10 flex flex-col">
+            <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 bg-amber-900/90 text-amber-200 text-xs">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
+              </span>
+              TinyFish Web Agent working...
+            </div>
+            <div className="flex-1 w-full relative">
+              <iframe
+                src={tinyfishStreamUrl}
+                className="absolute inset-0 w-full h-full border-none bg-white"
+                sandbox="allow-scripts allow-same-origin"
+                title="TinyFish Live Browser Stream"
+              />
+              {/* Block all user interaction — view-only */}
+              <div className="absolute inset-0 z-10" />
+            </div>
+          </div>
+        ) : null}
+
+        {!tinyfishStreamUrl && frameSrc ? (
           <img
             src={frameSrc}
             alt="Browser"
             className="w-full h-full object-contain"
           />
-        ) : (
+        ) : !tinyfishStreamUrl ? (
           <div className="text-center text-[var(--color-text-muted)]">
-            {isRunning ? (
-              <>
-                <Globe className="w-12 h-12 mx-auto mb-2 opacity-30" />
-                <p className="text-sm">Waiting for browser activity...</p>
-                <p className="text-xs mt-1 opacity-50">
-                  Screenshots will appear here when browsing
-                </p>
-              </>
-            ) : (
-              <>
-                <Globe className="w-12 h-12 mx-auto mb-2 opacity-30" />
-                <p className="text-sm">Not connected</p>
-                <p className="text-xs mt-1 opacity-50">
-                  Start your computer to see browser activity
-                </p>
-              </>
-            )}
+            <Globe className="w-12 h-12 mx-auto mb-2 opacity-30" />
+            <p className="text-sm">Loading...</p>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Status bar */}
       <div className="shrink-0 flex items-center justify-between px-2 py-1 text-xs border-t border-[var(--color-border)] bg-[var(--color-surface-raised)] text-[var(--color-text-muted)]">
         <span className="truncate">{isLoading ? 'Loading...' : pageTitle || 'Ready'}</span>
-        <span>{connected ? 'Connected' : 'Disconnected'}</span>
+        <div className="flex items-center gap-2 shrink-0">
+          {tinyfishStreamUrl ? (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/20 text-amber-400 border border-amber-500/30">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-400"></span>
+              </span>
+              TinyFish
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--color-border)] text-[var(--color-text-muted)]">
+              Local
+            </span>
+          )}
+          <span>{connected ? 'Connected' : 'Disconnected'}</span>
+        </div>
       </div>
     </div>
   );

@@ -19,12 +19,24 @@ const ScheduleSchema = z.object({
   enabled: z.boolean().default(true),
 });
 
+// TinyFish config schema
+const TinyFishSchema = z.object({
+  apiKey: z.string().default(''),
+  baseUrl: z.string().default('https://agent.tinyfish.ai'),
+  defaultProfile: z.enum(['lite', 'stealth']).default('lite'),
+});
+
 // Full config schema
 const ConfigSchema = z.object({
   openrouter: z.object({
     apiKey: z.string(),
     model: z.string().default('nvidia/nemotron-3-nano-30b-a3b:free'),
     baseUrl: z.string().default('https://openrouter.ai/api/v1'),
+  }),
+  tinyfish: TinyFishSchema.default({
+    apiKey: '',
+    baseUrl: 'https://agent.tinyfish.ai',
+    defaultProfile: 'lite',
   }),
   identity: z.object({
     name: z.string().default('BoneClaw Agent'),
@@ -52,6 +64,11 @@ const DEFAULT_CONFIG: Config = {
     apiKey: '',
     model: 'nvidia/nemotron-3-nano-30b-a3b:free',
     baseUrl: 'https://openrouter.ai/api/v1',
+  },
+  tinyfish: {
+    apiKey: '',
+    baseUrl: 'https://agent.tinyfish.ai',
+    defaultProfile: 'lite',
   },
   identity: {
     name: 'BoneClaw Agent',
@@ -99,6 +116,10 @@ function parseYamlConfig(content: string): Partial<Config> {
   const workspaceMatch = content.match(/exec:\s*\n\s*workspace:\s*(\S+)/m);
   const workspace = workspaceMatch ? workspaceMatch[1] : undefined;
   
+  // Extract TinyFish API key: tinyfish:\n    api_key: "..."
+  const tinyfishKeyMatch = content.match(/tinyfish:\s*\n\s*api_key:\s*"([^"]*)"/m);
+  const tinyfishApiKey = tinyfishKeyMatch ? tinyfishKeyMatch[1] : '';
+  
   // Extract transport port: port: N
   const portMatch = content.match(/transport:\s*\n\s*http:\s*\n\s*enabled:\s*true\s*\n\s*port:\s*(\d+)/m);
   const _port = portMatch ? parseInt(portMatch[1], 10) : undefined;
@@ -108,6 +129,13 @@ function parseYamlConfig(content: string): Partial<Config> {
       ...DEFAULT_CONFIG.openrouter,
       ...(apiKey ? { apiKey } : {}),
       ...(model ? { model } : {}),
+    };
+  }
+  
+  if (tinyfishApiKey) {
+    config.tinyfish = {
+      ...DEFAULT_CONFIG.tinyfish,
+      apiKey: tinyfishApiKey,
     };
   }
   
@@ -180,11 +208,21 @@ export function loadConfig(configPath?: string): Config {
     config.workspace = process.env.BONECLAW_WORKSPACE;
   }
   
+  // Override with TinyFish env var
+  if (process.env.TINYFISH_API_KEY) {
+    config.tinyfish = {
+      ...DEFAULT_CONFIG.tinyfish,
+      ...config.tinyfish,
+      apiKey: process.env.TINYFISH_API_KEY,
+    };
+  }
+  
   // Merge with defaults and validate
   const merged = {
     ...DEFAULT_CONFIG,
     ...config,
     openrouter: { ...DEFAULT_CONFIG.openrouter, ...config.openrouter },
+    tinyfish: { ...DEFAULT_CONFIG.tinyfish, ...config.tinyfish },
     identity: { ...DEFAULT_CONFIG.identity, ...config.identity },
     memory: { ...DEFAULT_CONFIG.memory, ...config.memory },
     heartbeat: { ...DEFAULT_CONFIG.heartbeat, ...config.heartbeat },
@@ -204,5 +242,6 @@ export function getConfigSummary(config: Config): Record<string, unknown> {
     schedules: config.schedules.length,
     workspace: config.workspace,
     hasApiKey: !!config.openrouter.apiKey,
+    hasTinyfishKey: !!config.tinyfish.apiKey,
   };
 }

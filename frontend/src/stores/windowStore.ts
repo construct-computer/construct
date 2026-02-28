@@ -190,21 +190,131 @@ function computeGridLayout(
   });
 }
 
-// Calculate cascaded position (offset from previous windows)
-function getCascadedPosition(windows: WindowConfig[], width: number, height: number): { x: number; y: number } {
-  const offset = 30;
-  const baseX = 50;
-  const baseY = 50;
-  
-  const x = baseX + (windows.length % 10) * offset;
-  const y = baseY + (windows.length % 10) * offset;
-  
-  const maxX = window.innerWidth - width;
-  const maxY = window.innerHeight - MENUBAR_HEIGHT - DOCK_HEIGHT - height;
-  
+/**
+ * Find a position for a new window that doesn't overlap existing windows.
+ *
+ * Strategy:
+ *  1. First window always opens near top-left
+ *  2. Subsequent windows: scan candidates (grid + edges of existing windows),
+ *     pick the one with least overlap, breaking ties by proximity to top-left
+ *  3. If screen is too crowded, cascade from top-left with offset
+ */
+function getSmartPosition(
+  windows: WindowConfig[],
+  width: number,
+  height: number,
+): { x: number; y: number } {
+  const screenW = globalThis.innerWidth;
+  const screenH = globalThis.innerHeight - MENUBAR_HEIGHT - DOCK_HEIGHT;
+  const padding = 16;
+  const gap = 12;
+
+  // Usable area bounds
+  const maxX = Math.max(0, screenW - width - padding);
+  const maxY = Math.max(0, screenH - height - padding);
+
+  // Only consider visible (non-minimized) windows for overlap
+  const visible = windows.filter((w) => w.state !== 'minimized');
+
+  // First window — top-left
+  if (visible.length === 0) {
+    return { x: padding, y: padding };
+  }
+
+  // Minimum spacing between windows on all sides
+  const spacing = 12;
+
+  // Helper: overlap area between a candidate rect and an existing window.
+  // Each window is inflated by `spacing` so positions that are too close
+  // are penalised even if they don't technically overlap pixel-for-pixel.
+  function overlapArea(cx: number, cy: number, win: WindowConfig): number {
+    const ox = Math.max(0, Math.min(cx + width, win.x + win.width + spacing) - Math.max(cx, win.x - spacing));
+    const oy = Math.max(0, Math.min(cy + height, win.y + win.height + spacing) - Math.max(cy, win.y - spacing));
+    return ox * oy;
+  }
+
+  // Total overlap for a candidate position
+  function totalOverlap(cx: number, cy: number): number {
+    let total = 0;
+    for (const win of visible) {
+      total += overlapArea(cx, cy, win);
+    }
+    return total;
+  }
+
+  // Distance from top-left (for tie-breaking — prefer positions closer to origin)
+  function distFromOrigin(cx: number, cy: number): number {
+    return cx + cy;
+  }
+
+  // --- Build candidate positions ---
+  const candidates: Array<{ x: number; y: number }> = [];
+
+  // 1. Snapped positions adjacent to existing windows (most natural tiling)
+  for (const win of visible) {
+    // Right of window, aligned to its top
+    const rx = win.x + win.width + gap;
+    if (rx >= 0 && rx <= maxX) {
+      candidates.push({ x: rx, y: clamp(win.y, padding, maxY) });
+    }
+    // Below window, aligned to its left
+    const by = win.y + win.height + gap;
+    if (by >= 0 && by <= maxY) {
+      candidates.push({ x: clamp(win.x, padding, maxX), y: by });
+    }
+    // Left of window
+    const lx = win.x - width - gap;
+    if (lx >= 0 && lx <= maxX) {
+      candidates.push({ x: lx, y: clamp(win.y, padding, maxY) });
+    }
+    // Above window
+    const ay = win.y - height - gap;
+    if (ay >= 0 && ay <= maxY) {
+      candidates.push({ x: clamp(win.x, padding, maxX), y: ay });
+    }
+  }
+
+  // 2. Grid scan across the screen (finer near top-left, coarser elsewhere)
+  const step = 50;
+  for (let cy = padding; cy <= maxY; cy += step) {
+    for (let cx = padding; cx <= maxX; cx += step) {
+      candidates.push({ x: cx, y: cy });
+    }
+  }
+
+  // 3. Always include top-left as a candidate
+  candidates.unshift({ x: padding, y: padding });
+
+  // --- Score and pick best candidate ---
+  let bestPos = { x: padding, y: padding };
+  let bestOverlap = Infinity;
+  let bestDist = Infinity;
+
+  for (const c of candidates) {
+    const ov = totalOverlap(c.x, c.y);
+    const dist = distFromOrigin(c.x, c.y);
+
+    // Better if: less overlap, or same overlap but closer to top-left
+    if (ov < bestOverlap || (ov === bestOverlap && dist < bestDist)) {
+      bestOverlap = ov;
+      bestDist = dist;
+      bestPos = c;
+    }
+  }
+
+  // If everything overlaps heavily, cascade with offset from top-left
+  if (bestOverlap > width * height * 0.3) {
+    const offset = 30;
+    const cascadeIndex = visible.length % 10;
+    return {
+      x: clamp(padding + cascadeIndex * offset, 0, maxX),
+      y: clamp(padding + cascadeIndex * offset, 0, maxY),
+    };
+  }
+
   return {
-    x: clamp(x, 0, Math.max(0, maxX)),
-    y: clamp(y, 0, Math.max(0, maxY)),
+    x: clamp(bestPos.x, padding, maxX),
+    y: clamp(bestPos.y, padding, maxY),
   };
 }
 
@@ -222,7 +332,7 @@ export const useWindowStore = create<WindowStore>()(
       const { windows, nextZIndex } = get();
       const position = options.x !== undefined && options.y !== undefined
         ? { x: options.x, y: options.y }
-        : getCascadedPosition(windows, width, height);
+        : getSmartPosition(windows, width, height);
       
       const id = options.id ?? generateId('window');
       

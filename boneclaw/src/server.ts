@@ -13,6 +13,7 @@ import type { AgentEvent } from './events/types';
 import type { AgentLoop } from './agent/loop';
 import type { Memory } from './memory';
 import type { SessionManager } from './memory/sessions';
+import { getTinyfishState } from './tools/web_search';
 
 // WebSocket clients subscribed to events
 const eventClients = new Set<ServerWebSocket<unknown>>();
@@ -49,6 +50,13 @@ function transformEvent(event: AgentEvent): Record<string, unknown> {
     'terminal:command': 'terminal:command',
     'terminal:output': 'terminal:output',
     'terminal:exit': 'terminal:exit',
+    // TinyFish events pass through
+    'tinyfish:start': 'tinyfish:start',
+    'tinyfish:started': 'tinyfish:started',
+    'tinyfish:streaming_url': 'tinyfish:streaming_url',
+    'tinyfish:progress': 'tinyfish:progress',
+    'tinyfish:complete': 'tinyfish:complete',
+    'tinyfish:error': 'tinyfish:error',
   };
 
   const mappedType = typeMap[type] || type;
@@ -153,12 +161,20 @@ export function startServer(options: ServerOptions): ReturnType<typeof Bun.serve
       // GET /status - Agent status
       if (url.pathname === '/status' && req.method === 'GET') {
         const uptimeSeconds = Math.floor((Date.now() - startTime) / 1000);
+        const tf = getTinyfishState();
         return Response.json({
           running: true,
           model: config.model,
           provider: config.provider,
           session_count: 1,
           uptime_seconds: uptimeSeconds,
+          tinyfish: tf.active ? {
+            active: true,
+            streamingUrl: tf.streamingUrl,
+            url: tf.url,
+            goal: tf.goal,
+            lastProgress: tf.lastProgress,
+          } : { active: false },
         }, { headers: corsHeaders });
       }
       
@@ -281,6 +297,30 @@ export function startServer(options: ServerOptions): ReturnType<typeof Bun.serve
       open(ws) {
         console.error('[Server] WebSocket client connected');
         eventClients.add(ws);
+        
+        // If TinyFish is currently active, re-emit its state so the
+        // newly connected client (e.g. after page refresh) picks it up.
+        const tf = getTinyfishState();
+        if (tf.active) {
+          if (tf.streamingUrl) {
+            const urlEvent = transformEvent({
+              type: 'tinyfish:streaming_url',
+              runId: tf.runId || '',
+              streamingUrl: tf.streamingUrl,
+              timestamp: Date.now(),
+            } as AgentEvent);
+            try { ws.send(JSON.stringify(urlEvent)); } catch { /* */ }
+          }
+          if (tf.lastProgress) {
+            const progressEvent = transformEvent({
+              type: 'tinyfish:progress',
+              runId: tf.runId || '',
+              purpose: tf.lastProgress,
+              timestamp: Date.now(),
+            } as AgentEvent);
+            try { ws.send(JSON.stringify(progressEvent)); } catch { /* */ }
+          }
+        }
       },
       
       message(_ws, _message) {

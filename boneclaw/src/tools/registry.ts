@@ -4,6 +4,7 @@ import { browserTool } from './browser';
 import { execTool } from './exec';
 import { readTool, writeTool, editTool, listTool } from './filesystem';
 import { notifyTool } from './notify';
+import { webSearchTool } from './web_search';
 import { emitToolStart, emitToolEnd } from '../events/emitter';
 
 /**
@@ -40,6 +41,7 @@ registry.register(writeTool);
 registry.register(editTool);
 registry.register(listTool);
 registry.register(notifyTool);
+registry.register(webSearchTool);
 
 /**
  * Execute a tool call

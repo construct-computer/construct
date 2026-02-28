@@ -37,6 +37,7 @@ function generateBoneclawConfig(config: AgentConfig): string {
   const openrouterKey = config.openrouter_api_key || ''
   const model = config.model || ''
   const telegramToken = config.telegram_bot_token || ''
+  const tinyfishKey = config.tinyfish_api_key || ''
 
   // Escape YAML special chars in strings
   const escapeYaml = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
@@ -53,6 +54,9 @@ function generateBoneclawConfig(config: AgentConfig): string {
   return `telegram:
   token: "${escapeYaml(telegramToken)}"
   allowed_users: []
+
+tinyfish:
+  api_key: "${escapeYaml(tinyfishKey)}"
 
 llm:
   default_provider: ${defaultProvider}
@@ -425,6 +429,10 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
       const rawApiKey = openrouterMatch ? openrouterMatch[1] : ''
       const rawTelegramToken = extract(/token:\s*"([^"]*)"/m)
       const model = extract(/default_model:\s*"([^"]*)"/m)
+      
+      // Extract TinyFish key
+      const tinyfishMatch = configContent.match(/tinyfish:\s*\n\s*api_key:\s*"([^"]*)"/m)
+      const rawTinyfishKey = tinyfishMatch ? tinyfishMatch[1] : ''
 
       const isReal = (s: string) => s.length > 0 && !s.startsWith('${')
 
@@ -437,9 +445,11 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
       return {
         openrouter_api_key: mask(rawApiKey),
         telegram_bot_token: mask(rawTelegramToken),
+        tinyfish_api_key: mask(rawTinyfishKey),
         model: isReal(model) ? model : '',
         has_api_key: isReal(rawApiKey),
         has_telegram_token: isReal(rawTelegramToken),
+        has_tinyfish_key: isReal(rawTinyfishKey),
       }
     } catch {
       set.status = 500
@@ -477,10 +487,11 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
       }
       const hasApiKey = hasRealValue(/openrouter:\s*\n\s*api_key:\s*"([^"]*)"/m)
       const hasTelegramToken = hasRealValue(/token:\s*"([^"]*)"/m)
+      const hasTinyfishKey = hasRealValue(/tinyfish:\s*\n\s*api_key:\s*"([^"]*)"/m)
 
-      return { configured: hasApiKey, hasApiKey, hasTelegramToken }
+      return { configured: hasApiKey, hasApiKey, hasTelegramToken, hasTinyfishKey }
     } catch {
-      return { configured: false, hasApiKey: false, hasTelegramToken: false }
+      return { configured: false, hasApiKey: false, hasTelegramToken: false, hasTinyfishKey: false }
     }
   })
 
@@ -504,6 +515,7 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
     try {
       let existingApiKey = ''
       let existingTelegramToken = ''
+      let existingTinyfishKey = ''
       let existingModel = ''
 
       try {
@@ -520,6 +532,8 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
         existingApiKey = clean(openrouterMatch ? openrouterMatch[1] : '')
         existingTelegramToken = clean(extract(/token:\s*"([^"]*)"/m))
         existingModel = clean(extract(/default_model:\s*"([^"]*)"/m))
+        const tinyfishMatch = existing.match(/tinyfish:\s*\n\s*api_key:\s*"([^"]*)"/m)
+        existingTinyfishKey = clean(tinyfishMatch ? tinyfishMatch[1] : '')
       } catch {
         // Can't read existing config — start from defaults
       }
@@ -527,6 +541,7 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
       const mergedConfig: AgentConfig = {
         openrouter_api_key: config.openrouter_api_key ?? existingApiKey,
         telegram_bot_token: config.telegram_bot_token ?? existingTelegramToken,
+        tinyfish_api_key: config.tinyfish_api_key ?? existingTinyfishKey,
         model: config.model ?? existingModel,
       }
 

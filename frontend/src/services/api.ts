@@ -174,6 +174,7 @@ export async function getAgentConfig(instanceId: string): Promise<ApiResult<Agen
 export async function updateAgentConfig(instanceId: string, config: {
   openrouter_api_key?: string;
   telegram_bot_token?: string;
+  tinyfish_api_key?: string;
   model?: string;
 }): Promise<ApiResult<{ status: string; message: string }>> {
   return request(`/instances/${instanceId}/agent/config`, {
@@ -197,6 +198,7 @@ export interface AgentConfigStatus {
   configured: boolean;
   hasApiKey: boolean;
   hasTelegramToken: boolean;
+  hasTinyfishKey: boolean;
 }
 
 export async function getAgentConfigStatus(instanceId: string): Promise<ApiResult<AgentConfigStatus>> {

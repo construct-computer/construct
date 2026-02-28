@@ -45,7 +45,7 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
 
     // ── Phase 1: "hello" ───────────────────────────────
     t(() => setHelloIn(true), 200);       // rise in
-    t(() => setHelloOut(true), 4000);     // drift out (+1s)
+    t(() => setHelloOut(true), 4000);     // drift out
     t(() => {                              // swap to phase 2
       setShowHello(false);
       setShowBrand(true);
@@ -118,7 +118,7 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
         }}
       />
 
-      {/* ── Phase 1: "hello" — handwriting reveal ── */}
+      {/* ── Phase 1: "hello" — handwriting reveal with flowing gradient ── */}
       {showHello && (
         <h1
           className="hello-cursive select-none relative z-10"
@@ -126,24 +126,23 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
             fontSize: 'clamp(5rem, 15vw, 13rem)',
             lineHeight: 1,
             letterSpacing: '-0.01em',
-            // Gradient fill
-            background: 'linear-gradient(135deg, #60A5FA 0%, #818CF8 12%, #C084FC 24%, #F472B6 36%, #FB7185 48%, #FB923C 60%, #FBBF24 72%, #34D399 84%, #60A5FA 100%)',
-            backgroundSize: '300% 300%',
+            // Warm (red/orange) → cool (green/emerald), repeated 4x for seamless
+            // looping at 400% width. Only 2-3 colors visible across the text.
+            background: 'linear-gradient(90deg, #FB923C 0%, #EF4444 7%, #FB923C 14%, #39FF14 20%, #00FF66 25%, #FB923C 32%, #EF4444 39%, #FB923C 45%, #39FF14 50%, #00FF66 57%, #FB923C 64%, #EF4444 70%, #FB923C 75%, #39FF14 82%, #00FF66 89%, #FB923C 95%, #EF4444 100%)',
+            backgroundSize: '400% 100%',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
-            // Handwriting mask — soft-edge gradient driven by --hello-reveal
+            // Handwriting mask — soft-edge sweep left to right
             ...(helloIn ? {
               WebkitMaskImage: 'linear-gradient(to right, black calc(var(--hello-reveal) - 6%), transparent var(--hello-reveal))',
               maskImage: 'linear-gradient(to right, black calc(var(--hello-reveal) - 6%), transparent var(--hello-reveal))',
             } : {}),
-            // Gradient color shift runs continuously; handwriting reveal plays once on enter
+            // Continuous left-flowing gradient + handwriting reveal
             animation: helloIn
-              ? 'hello-gradient 6s linear infinite, hello-write 2.5s cubic-bezier(0.4, 0, 0.2, 1) forwards'
+              ? 'hello-gradient 12s linear infinite, hello-write 2.5s cubic-bezier(0.4, 0, 0.2, 1) forwards'
               : 'none',
-            // Opacity: instant on enter (mask handles the reveal), smooth on exit
             opacity: helloOut ? 0 : helloIn ? 1 : 0,
-            // Exit: drift upward
             transform: helloOut ? 'translateY(-24px)' : 'none',
             transition: helloOut
               ? 'opacity 0.7s ease-in, transform 0.7s ease-in'

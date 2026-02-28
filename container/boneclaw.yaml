@@ -6,6 +6,9 @@ telegram:
   token: ""
   allowed_users: []
 
+tinyfish:
+  api_key: ""
+
 llm:
   default_provider: openrouter
   default_model: ""

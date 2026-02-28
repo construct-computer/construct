@@ -16,7 +16,7 @@ export interface ChatMessage {
   /** For activity messages: which tool triggered it */
   tool?: string;
   /** For activity messages: icon hint for rendering */
-  activityType?: 'browser' | 'terminal' | 'file' | 'desktop' | 'tool';
+  activityType?: 'browser' | 'tinyfish' | 'terminal' | 'file' | 'desktop' | 'tool';
 }
 
 /** Build a human-readable activity description from a tool_call event */
@@ -91,6 +91,17 @@ function describeToolCall(tool: string, params?: Record<string, unknown>): { tex
     return { text: `Desktop: ${action || 'action'}`, activityType: 'desktop' };
   }
 
+  // TinyFish web_search tool
+  if (tool === 'web_search') {
+    const url = p.url as string | undefined;
+    const goal = p.goal as string | undefined;
+    if (url && goal) {
+      const shortGoal = goal.length > 60 ? goal.slice(0, 60) + '...' : goal;
+      return { text: `TinyFish: ${shortGoal} (${url})`, activityType: 'tinyfish' };
+    }
+    return { text: `TinyFish web search${url ? `: ${url}` : ''}`, activityType: 'tinyfish' };
+  }
+
   // Notify tool
   if (tool === 'notify') {
     return { text: `Notification: ${p.title || 'alert'}`, activityType: 'desktop' };
@@ -104,6 +115,7 @@ function describeToolCall(tool: string, params?: Record<string, unknown>): { tex
 function toolToWindowType(tool: string): WindowType | null {
   // Handle both MCP-style (browser_*) and boneclaw-style (browser) tool names
   if (tool === 'browser' || tool.startsWith('browser_')) return 'browser';
+  if (tool === 'web_search') return 'browser'; // TinyFish opens in browser view
   if (tool === 'exec') return 'terminal';
   if (tool === 'read' || tool === 'write' || tool === 'edit' || tool === 'list') return 'editor';
   if (tool === 'file_read' || tool === 'file_write' || tool === 'file_edit') return 'editor';
@@ -150,6 +162,8 @@ interface BrowserState {
   connected: boolean;
   tabs: BrowserTab[];
   activeTabId: string | null;
+  /** TinyFish live browser stream URL (shown as iframe overlay) */
+  tinyfishStreamUrl: string | null;
 }
 
 interface TerminalState {
@@ -167,6 +181,7 @@ interface ComputerStore {
   
   // API key configuration status
   hasApiKey: boolean;
+  hasTinyfishKey: boolean;
   configChecked: boolean;
   
   // Real-time state for the computer
@@ -185,7 +200,7 @@ interface ComputerStore {
   // Actions
   fetchComputer: () => Promise<void>;
   checkConfigStatus: () => Promise<void>;
-  updateComputer: (data: { openrouterApiKey?: string; model?: string }) => Promise<boolean>;
+  updateComputer: (data: { openrouterApiKey?: string; tinyfishApiKey?: string; model?: string }) => Promise<boolean>;
   startComputer: () => Promise<boolean>;
   stopComputer: () => Promise<boolean>;
   
@@ -224,6 +239,7 @@ export const useComputerStore = create<ComputerStore>()(
     isLoading: false,
     error: null,
     hasApiKey: false,
+    hasTinyfishKey: false,
     configChecked: false,
     browserState: {
       url: '',
@@ -233,6 +249,7 @@ export const useComputerStore = create<ComputerStore>()(
       connected: false,
       tabs: [],
       activeTabId: null,
+      tinyfishStreamUrl: null,
     },
     terminalState: {
       output: [],
@@ -310,11 +327,12 @@ export const useComputerStore = create<ComputerStore>()(
       if (result.success) {
         set({ 
           hasApiKey: result.data.hasApiKey,
+          hasTinyfishKey: result.data.hasTinyfishKey,
           configChecked: true,
         });
       } else {
         // If we can't check, assume not configured
-        set({ configChecked: true, hasApiKey: false });
+        set({ configChecked: true, hasApiKey: false, hasTinyfishKey: false });
       }
     },
     
@@ -324,6 +342,7 @@ export const useComputerStore = create<ComputerStore>()(
       
       const result = await api.updateAgentConfig(instanceId, {
         openrouter_api_key: data.openrouterApiKey,
+        tinyfish_api_key: data.tinyfishApiKey,
         model: data.model,
       });
       
@@ -503,7 +522,7 @@ export const useComputerStore = create<ComputerStore>()(
       agentWS.disconnect();
       
       set({
-        browserState: { url: '', title: '', screenshot: null, isLoading: false, connected: false, tabs: [], activeTabId: null },
+        browserState: { url: '', title: '', screenshot: null, isLoading: false, connected: false, tabs: [], activeTabId: null, tinyfishStreamUrl: null },
         terminalState: { output: [], cwd: '~', connected: false },
         agentConnected: false,
         agentActivity: new Set<WindowType>(),
@@ -869,6 +888,16 @@ export const useComputerStore = create<ComputerStore>()(
             set({ agentThinking: null });
           }
           
+          // Clear TinyFish overlay when web_search tool completes (safety net)
+          if (tool === 'web_search') {
+            set({
+              browserState: {
+                ...get().browserState,
+                tinyfishStreamUrl: null,
+              },
+            });
+          }
+          
           // Extract screenshot from browser tool results as fallback frame
           if (tool.startsWith('browser_')) {
             const result = event.data?.result as Record<string, unknown> | undefined;
@@ -897,7 +926,15 @@ export const useComputerStore = create<ComputerStore>()(
         case 'status_change': {
           const status = event.data?.status as string;
           if (status === 'idle') {
-            set({ agentThinking: null, agentActivity: new Set<WindowType>() });
+            // Agent is fully done — clear everything including any stale TinyFish overlay
+            set({
+              agentThinking: null,
+              agentActivity: new Set<WindowType>(),
+              browserState: {
+                ...get().browserState,
+                tinyfishStreamUrl: null,
+              },
+            });
           }
           break;
         }
@@ -975,6 +1012,101 @@ export const useComputerStore = create<ComputerStore>()(
               { role: 'agent', content: `Error: ${message}`, timestamp: new Date() },
             ],
             agentThinking: null,
+          });
+          break;
+        }
+        
+        // TinyFish web agent events — show progress in activity log + browser view
+        case 'tinyfish:start': {
+          const url = event.data?.url as string || '';
+          const goal = event.data?.goal as string || '';
+          const shortGoal = goal.length > 60 ? goal.slice(0, 60) + '...' : goal;
+          // Clear any stale stream URL from a previous run before starting fresh
+          set({
+            agentThinking: `TinyFish: ${shortGoal}...`,
+            browserState: {
+              ...get().browserState,
+              tinyfishStreamUrl: null,
+            },
+          });
+          // Add activity entry
+          const { chatMessages: msgs } = get();
+          set({
+            chatMessages: [
+              ...msgs,
+              {
+                role: 'activity' as const,
+                content: `TinyFish scraping ${url}`,
+                timestamp: new Date(),
+                tool: 'web_search',
+                activityType: 'tinyfish',
+              },
+            ],
+          });
+          // Auto-open browser window
+          useWindowStore.getState().ensureWindowOpen('browser');
+          const activity = new Set(get().agentActivity);
+          activity.add('browser');
+          set({ agentActivity: activity });
+          break;
+        }
+        
+        case 'tinyfish:streaming_url': {
+          const streamingUrl = event.data?.streamingUrl as string;
+          if (streamingUrl) {
+            set({
+              browserState: {
+                ...get().browserState,
+                // Store the streaming URL so BrowserWindow can show it as an iframe
+                tinyfishStreamUrl: streamingUrl,
+              } as BrowserState,
+            });
+          }
+          break;
+        }
+        
+        case 'tinyfish:progress': {
+          const purpose = event.data?.purpose as string || 'Working...';
+          set({ agentThinking: `TinyFish: ${purpose}` });
+          // Add progress as an activity entry
+          const { chatMessages: progressMsgs } = get();
+          set({
+            chatMessages: [
+              ...progressMsgs,
+              {
+                role: 'activity' as const,
+                content: `TinyFish: ${purpose}`,
+                timestamp: new Date(),
+                tool: 'web_search',
+                activityType: 'tinyfish',
+              },
+            ],
+          });
+          break;
+        }
+        
+        case 'tinyfish:complete': {
+          // Clear TinyFish streaming state
+          set({
+            agentThinking: null,
+            browserState: {
+              ...get().browserState,
+              tinyfishStreamUrl: null,
+            } as BrowserState,
+          });
+          const tinyfishActivity = new Set(get().agentActivity);
+          tinyfishActivity.delete('browser');
+          set({ agentActivity: tinyfishActivity });
+          break;
+        }
+        
+        case 'tinyfish:error': {
+          set({
+            agentThinking: null,
+            browserState: {
+              ...get().browserState,
+              tinyfishStreamUrl: null,
+            } as BrowserState,
           });
           break;
         }

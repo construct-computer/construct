@@ -20,6 +20,7 @@ export interface AgentStatus {
 export interface AgentConfig {
   openrouter_api_key?: string
   telegram_bot_token?: string
+  tinyfish_api_key?: string
   model?: string
 }
 

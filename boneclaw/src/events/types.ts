@@ -32,7 +32,14 @@ export type AgentEvent =
   // File system events
   | { type: 'fs:read'; path: string; timestamp: number }
   | { type: 'fs:write'; path: string; timestamp: number }
-  | { type: 'fs:edit'; path: string; timestamp: number };
+  | { type: 'fs:edit'; path: string; timestamp: number }
+  // TinyFish web agent events
+  | { type: 'tinyfish:start'; url: string; goal: string; timestamp: number }
+  | { type: 'tinyfish:started'; runId: string; timestamp: number }
+  | { type: 'tinyfish:streaming_url'; runId: string; streamingUrl: string; timestamp: number }
+  | { type: 'tinyfish:progress'; runId: string; purpose: string; timestamp: number }
+  | { type: 'tinyfish:complete'; runId: string; status: string; result: unknown; error: string | null; timestamp: number }
+  | { type: 'tinyfish:error'; error: string; timestamp: number };
 
 export type AgentStatus = 'idle' | 'thinking' | 'executing' | 'waiting' | 'error';
 

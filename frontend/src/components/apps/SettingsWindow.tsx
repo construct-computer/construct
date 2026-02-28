@@ -53,6 +53,7 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
     isLoading,
     error,
     hasApiKey,
+    hasTinyfishKey,
     configChecked,
     updateComputer,
     fetchComputer,
@@ -65,6 +66,7 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
   
   // AI configuration state
   const [apiKey, setApiKey] = useState('');
+  const [tinyfishKey, setTinyfishKey] = useState('');
   const [model, setModel] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -100,9 +102,12 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
       }
     }
     
-    const updates: { openrouterApiKey?: string; model?: string } = { model };
+    const updates: { openrouterApiKey?: string; tinyfishApiKey?: string; model?: string } = { model };
     if (apiKey.trim()) {
       updates.openrouterApiKey = apiKey.trim();
+    }
+    if (tinyfishKey.trim()) {
+      updates.tinyfishApiKey = tinyfishKey.trim();
     }
     
     // updateComputer already calls checkConfigStatus + fetchComputer
@@ -111,6 +116,7 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
     if (success) {
       setSaveSuccess(true);
       setApiKey('');
+      setTinyfishKey('');
       setTimeout(() => setSaveSuccess(false), 2000);
     } else {
       setSaveError('Failed to save configuration');
@@ -382,6 +388,56 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
                   className="text-[var(--color-accent)] hover:underline"
                 >
                   openrouter.ai/keys
+                </a>
+              </p>
+            </div>
+            
+            {/* TinyFish API Key */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <Label className="text-xs">TinyFish API Key</Label>
+                {configChecked && (
+                  <span
+                    className={`flex items-center gap-1 text-[11px] ${
+                      hasTinyfishKey
+                        ? 'text-[var(--color-success)]'
+                        : 'text-[var(--color-text-muted)]'
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        hasTinyfishKey ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-muted)]'
+                      }`}
+                    />
+                    {hasTinyfishKey ? 'Key set' : 'Optional'}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Key className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
+                  <Input
+                    type="text"
+                    autoComplete="off"
+                    data-1p-ignore
+                    data-lpignore="true"
+                    spellCheck={false}
+                    value={tinyfishKey}
+                    onChange={(e) => setTinyfishKey(e.target.value)}
+                    placeholder={hasTinyfishKey ? '••••••••••••••••' : 'sk-tinyfish-...'}
+                    className="pl-8 text-sm"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                Enables AI web scraping and research.{' '}
+                <a 
+                  href="https://agent.tinyfish.ai/api-keys" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-[var(--color-accent)] hover:underline"
+                >
+                  Get a key
                 </a>
               </p>
             </div>
