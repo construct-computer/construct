@@ -1,6 +1,6 @@
 import type { Tool, ToolResult, ToolContext } from './types';
-import { spawn } from 'child_process';
 import { emit, openWindow, updateWindow, closeWindow } from '../events/emitter';
+import { sendCommand, isSuccess, responseToText } from './browser-ipc';
 
 // Track browser window ID
 let browserWindowId: string | null = null;
@@ -12,45 +12,29 @@ const PAGE_CHANGING_ACTIONS = new Set([
 ]);
 
 /**
- * Execute agent-browser CLI command
+ * Send a command to the agent-browser daemon and return {stdout, code} style result.
+ * Thin wrapper over sendCommand that normalizes the response for the handler.
  */
-async function runAgentBrowser(args: string[], cwd: string): Promise<{ stdout: string; stderr: string; code: number }> {
-  return new Promise((resolve) => {
-    const proc = spawn('agent-browser', args, {
-      cwd,
-      timeout: 60_000,
-      env: { ...process.env, AGENT_BROWSER_SESSION: 'default', PLAYWRIGHT_TIMEOUT: '45000' },
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (data) => {
-      stdout += data.toString();
-    });
-
-    proc.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    proc.on('close', (code) => {
-      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), code: code ?? 0 });
-    });
-
-    proc.on('error', (err) => {
-      resolve({ stdout: '', stderr: err.message, code: 1 });
-    });
-  });
+async function runCommand(cmd: Record<string, unknown>): Promise<{ stdout: string; code: number; data?: Record<string, unknown> }> {
+  try {
+    const resp = await sendCommand(cmd);
+    if (isSuccess(resp)) {
+      return { stdout: responseToText(resp), code: 0, data: resp.data as Record<string, unknown> | undefined };
+    }
+    return { stdout: (resp.error as string) || 'Command failed', code: 1 };
+  } catch (err) {
+    return { stdout: err instanceof Error ? err.message : String(err), code: 1 };
+  }
 }
 
 /**
- * Take a screenshot and return it as base64, or undefined on failure
+ * Take a screenshot via IPC and return base64, or undefined on failure.
  */
-async function takeScreenshot(cwd: string): Promise<string | undefined> {
+async function takeScreenshot(): Promise<string | undefined> {
   try {
     const ssPath = '/tmp/agent-context.png';
-    const ss = await runAgentBrowser(['screenshot', ssPath], cwd);
-    if (ss.code === 0) {
+    const resp = await sendCommand({ action: 'screenshot', path: ssPath });
+    if (isSuccess(resp)) {
       const file = Bun.file(ssPath);
       if (await file.exists()) {
         const buf = await file.arrayBuffer();
@@ -70,7 +54,6 @@ const MAX_SNAPSHOT_CHARS = 8000;
 async function enhanceWithVisualContext(
   basicResult: ToolResult,
   action: string,
-  cwd: string
 ): Promise<ToolResult> {
   if (!basicResult.success) return basicResult;
   if (!PAGE_CHANGING_ACTIONS.has(action)) return basicResult;
@@ -82,12 +65,11 @@ async function enhanceWithVisualContext(
   let output = basicResult.output;
 
   // For non-snapshot actions, auto-take a snapshot to provide element refs
-  // (snapshot action already has its own output with refs)
   if (action !== 'snapshot') {
     try {
-      const snap = await runAgentBrowser(['snapshot', '-i', '-c'], cwd);
-      if (snap.code === 0 && snap.stdout) {
-        let snapText = snap.stdout;
+      const snap = await sendCommand({ action: 'snapshot', interactive: true, compact: true });
+      if (isSuccess(snap)) {
+        let snapText = responseToText(snap);
         if (snapText.length > MAX_SNAPSHOT_CHARS) {
           snapText = snapText.slice(0, MAX_SNAPSHOT_CHARS) + '\n...(truncated)';
         }
@@ -97,7 +79,7 @@ async function enhanceWithVisualContext(
   }
 
   // Take screenshot for visual context (sent to LLM as image)
-  const screenshot = await takeScreenshot(cwd);
+  const screenshot = await takeScreenshot();
   if (screenshot) {
     emit({ type: 'browser:screenshot', data: screenshot });
   }
@@ -106,18 +88,32 @@ async function enhanceWithVisualContext(
 }
 
 /**
- * Browser tool handler
+ * Browser tool handler — sends commands directly to the agent-browser daemon
+ * via Unix socket IPC (no CLI process spawning).
  */
 async function browserHandler(
   args: Record<string, unknown>,
   context: ToolContext
 ): Promise<ToolResult> {
   const action = args.action as string;
-  const cliArgs: string[] = [];
+
+  // Build the daemon protocol command based on the action
+  let result: { stdout: string; code: number; data?: Record<string, unknown> };
 
   switch (action) {
     case 'status': {
-      cliArgs.push('session');
+      // Check if daemon is reachable by sending a simple command
+      try {
+        const resp = await sendCommand({ action: 'url' });
+        if (isSuccess(resp)) {
+          const url = (resp.data as Record<string, unknown>)?.url || 'unknown';
+          result = { stdout: `Browser active. Current URL: ${url}`, code: 0 };
+        } else {
+          result = { stdout: 'Browser not launched', code: 0 };
+        }
+      } catch {
+        result = { stdout: 'Daemon not running', code: 1 };
+      }
       break;
     }
 
@@ -126,31 +122,68 @@ async function browserHandler(
       if (!url) {
         return { success: false, output: 'URL is required for open action' };
       }
-      // Use domcontentloaded instead of load for faster navigation
-      cliArgs.push('open', url, '--wait', 'domcontentloaded');
-      
+
       // Open browser window in UI
       if (!browserWindowId) {
         browserWindowId = openWindow('browser', 'Browser');
       }
-      
       emit({ type: 'browser:navigating', url });
+
+      result = await runCommand({
+        action: 'navigate',
+        url,
+        waitUntil: 'domcontentloaded',
+      });
+
+      if (result.code === 0) {
+        emit({ type: 'browser:navigated', url, title: url });
+        if (browserWindowId) {
+          updateWindow(browserWindowId, { url, title: url });
+        }
+      }
       break;
     }
 
     case 'snapshot': {
-      cliArgs.push('snapshot');
-      if (args.interactive) cliArgs.push('-i');
-      if (args.compact) cliArgs.push('-c');
-      if (args.depth) cliArgs.push('-d', String(args.depth));
+      const snapCmd: Record<string, unknown> = {
+        action: 'snapshot',
+        interactive: args.interactive !== false ? true : undefined,
+        compact: args.compact !== false ? true : undefined,
+      };
+      if (args.depth) snapCmd.maxDepth = Number(args.depth);
+      result = await runCommand(snapCmd);
+
+      // Emit snapshot event for the frontend
+      if (result.code === 0 && result.data) {
+        emit({
+          type: 'browser:snapshot',
+          snapshot: result.data.snapshot || '',
+          refs: result.data.refs || {},
+        });
+      }
       break;
     }
 
     case 'screenshot': {
       const path = args.path as string || '/tmp/screenshot.png';
-      cliArgs.push('screenshot', path);
-      if (args.full) cliArgs.push('--full');
-      if (args.annotate) cliArgs.push('--annotate');
+      result = await runCommand({
+        action: 'screenshot',
+        path,
+        fullPage: args.full ? true : undefined,
+        annotate: args.annotate ? true : undefined,
+      });
+
+      // Read and emit the screenshot
+      if (result.code === 0) {
+        try {
+          const file = Bun.file(path);
+          if (await file.exists()) {
+            const buffer = await file.arrayBuffer();
+            const base64 = Buffer.from(buffer).toString('base64');
+            emit({ type: 'browser:screenshot', data: base64 });
+          }
+        } catch { /* ignore */ }
+      }
       break;
     }
 
@@ -159,8 +192,8 @@ async function browserHandler(
       if (!ref) {
         return { success: false, output: 'Ref is required for click action (e.g., @e1)' };
       }
-      cliArgs.push('click', ref);
       emit({ type: 'browser:action', action: 'click', target: ref });
+      result = await runCommand({ action: 'click', selector: ref });
       break;
     }
 
@@ -170,8 +203,8 @@ async function browserHandler(
       if (!ref || text === undefined) {
         return { success: false, output: 'Ref and text are required for fill action' };
       }
-      cliArgs.push('fill', ref, text);
       emit({ type: 'browser:action', action: 'fill', target: ref });
+      result = await runCommand({ action: 'fill', selector: ref, value: text });
       break;
     }
 
@@ -181,8 +214,8 @@ async function browserHandler(
       if (!ref || text === undefined) {
         return { success: false, output: 'Ref and text are required for type action' };
       }
-      cliArgs.push('type', ref, text);
       emit({ type: 'browser:action', action: 'type', target: ref });
+      result = await runCommand({ action: 'type', selector: ref, text });
       break;
     }
 
@@ -191,8 +224,8 @@ async function browserHandler(
       if (!key) {
         return { success: false, output: 'Key is required for press action (e.g., Enter, Tab)' };
       }
-      cliArgs.push('press', key);
       emit({ type: 'browser:action', action: 'press', target: key });
+      result = await runCommand({ action: 'press', key });
       break;
     }
 
@@ -201,28 +234,42 @@ async function browserHandler(
       if (!ref) {
         return { success: false, output: 'Ref is required for hover action' };
       }
-      cliArgs.push('hover', ref);
       emit({ type: 'browser:action', action: 'hover', target: ref });
+      result = await runCommand({ action: 'hover', selector: ref });
       break;
     }
 
     case 'scroll': {
       const direction = args.direction as string || 'down';
       const amount = args.amount as number || 500;
-      cliArgs.push('scroll', direction, String(amount));
       emit({ type: 'browser:action', action: 'scroll', target: direction });
+      result = await runCommand({ action: 'scroll', direction, amount });
       break;
     }
 
     case 'wait': {
       if (args.text) {
-        cliArgs.push('wait', '--text', args.text as string);
+        // Wait for text to appear — use waitforfunction with a DOM text check
+        result = await runCommand({
+          action: 'waitforfunction',
+          expression: `document.body?.innerText?.includes(${JSON.stringify(args.text)})`,
+          timeout: 10000,
+        });
       } else if (args.selector) {
-        cliArgs.push('wait', args.selector as string);
+        result = await runCommand({
+          action: 'wait',
+          selector: args.selector as string,
+        });
       } else if (args.ms) {
-        cliArgs.push('wait', String(args.ms));
+        result = await runCommand({
+          action: 'wait',
+          timeout: Number(args.ms),
+        });
       } else {
-        cliArgs.push('wait', '--load', 'networkidle');
+        result = await runCommand({
+          action: 'waitforloadstate',
+          state: 'networkidle',
+        });
       }
       break;
     }
@@ -230,20 +277,34 @@ async function browserHandler(
     case 'get': {
       const what = args.what as string;
       const ref = args.ref as string;
-      if (what === 'title') {
-        cliArgs.push('get', 'title');
-      } else if (what === 'url') {
-        cliArgs.push('get', 'url');
-      } else if (ref) {
-        cliArgs.push('get', what, ref);
-      } else {
-        return { success: false, output: 'Invalid get action' };
+
+      switch (what) {
+        case 'title':
+          result = await runCommand({ action: 'title' });
+          break;
+        case 'url':
+          result = await runCommand({ action: 'url' });
+          break;
+        case 'text':
+          if (!ref) return { success: false, output: 'Ref required for get text' };
+          result = await runCommand({ action: 'gettext', selector: ref });
+          break;
+        case 'html':
+          if (!ref) return { success: false, output: 'Ref required for get html' };
+          result = await runCommand({ action: 'innerhtml', selector: ref });
+          break;
+        case 'value':
+          if (!ref) return { success: false, output: 'Ref required for get value' };
+          result = await runCommand({ action: 'inputvalue', selector: ref });
+          break;
+        default:
+          return { success: false, output: `Unknown get target: ${what}` };
       }
       break;
     }
 
     case 'close': {
-      cliArgs.push('close');
+      result = await runCommand({ action: 'close' });
       if (browserWindowId) {
         closeWindow(browserWindowId);
         browserWindowId = null;
@@ -252,50 +313,44 @@ async function browserHandler(
     }
 
     case 'tabs': {
-      // List all open tabs
-      cliArgs.push('tab');
+      result = await runCommand({ action: 'tab_list' });
       break;
     }
 
     case 'tab_new': {
-      // Open a new tab, optionally with a URL
-      const url = args.url as string;
-      if (url) {
-        cliArgs.push('tab', 'new', url);
-      } else {
-        cliArgs.push('tab', 'new');
-      }
-      
+      const url = args.url as string | undefined;
+
       // Ensure browser window is open in UI
       if (!browserWindowId) {
         browserWindowId = openWindow('browser', 'Browser');
       }
-      
       if (url) {
         emit({ type: 'browser:navigating', url });
       }
+
+      result = await runCommand({
+        action: 'tab_new',
+        ...(url && { url }),
+      });
       break;
     }
 
     case 'tab_close': {
-      // Close a tab by index (0-based), or current tab if no index
       const index = args.index as number;
-      if (index !== undefined) {
-        cliArgs.push('tab', 'close', String(index));
-      } else {
-        cliArgs.push('tab', 'close');
-      }
+      result = await runCommand({
+        action: 'tab_close',
+        ...(index !== undefined && { index }),
+      });
       break;
     }
 
     case 'tab_switch': {
-      // Switch to a tab by index (0-based)
       const index = args.index as number;
       if (index === undefined) {
         return { success: false, output: 'Index is required for tab_switch action' };
       }
-      cliArgs.push('tab', String(index));
       emit({ type: 'browser:action', action: 'tab_switch', target: String(index) });
+      result = await runCommand({ action: 'tab_switch', index });
       break;
     }
 
@@ -303,67 +358,20 @@ async function browserHandler(
       return { success: false, output: `Unknown browser action: ${action}` };
   }
 
-  // Add JSON output flag for parsing
-  if (['snapshot', 'get', 'screenshot', 'status', 'tabs'].includes(action)) {
-    cliArgs.push('--json');
-  }
-
-  const result = await runAgentBrowser(cliArgs, context.workdir);
-
   if (result.code !== 0) {
     return {
       success: false,
-      output: result.stderr || result.stdout || 'Browser command failed',
+      output: result.stdout || 'Browser command failed',
     };
   }
 
-  // Parse JSON output for snapshot
-  if (action === 'snapshot' && result.stdout) {
-    try {
-      const data = JSON.parse(result.stdout);
-      emit({ type: 'browser:snapshot', snapshot: data.data?.snapshot || '', refs: data.data?.refs || {} });
-      const basicResult: ToolResult = {
-        success: true,
-        output: data.data?.snapshot || result.stdout,
-        data,
-      };
-      // Enhance snapshot with a screenshot for visual context
-      return enhanceWithVisualContext(basicResult, action, context.workdir);
-    } catch {
-      return enhanceWithVisualContext({ success: true, output: result.stdout }, action, context.workdir);
-    }
-  }
-
-  // Parse navigated URL
-  if (action === 'open') {
-    const url = args.url as string;
-    emit({ type: 'browser:navigated', url, title: url });
-    if (browserWindowId) {
-      updateWindow(browserWindowId, { url, title: url });
-    }
-  }
-
-  // Handle explicit screenshot action
-  if (action === 'screenshot' && result.stdout) {
-    try {
-      const data = JSON.parse(result.stdout);
-      if (data.data?.path) {
-        const file = Bun.file(data.data.path);
-        const buffer = await file.arrayBuffer();
-        const base64 = Buffer.from(buffer).toString('base64');
-        emit({ type: 'browser:screenshot', data: base64 });
-      }
-    } catch {
-      // Not JSON, just return stdout
-    }
-  }
-
-  // Enhance page-changing actions with auto-snapshot + screenshot
   const basicResult: ToolResult = {
     success: true,
     output: result.stdout || 'OK',
+    ...(result.data && { data: result.data }),
   };
-  return enhanceWithVisualContext(basicResult, action, context.workdir);
+
+  return enhanceWithVisualContext(basicResult, action);
 }
 
 export const browserTool: Tool = {
@@ -461,6 +469,10 @@ For multiple sites: use 'tab_new' with url, then 'tab_switch' to navigate betwee
           index: {
             type: 'number',
             description: 'Tab index (0-based) for tab_switch or tab_close actions',
+          },
+          depth: {
+            type: 'number',
+            description: 'Limit snapshot tree depth',
           },
         },
         required: ['action'],

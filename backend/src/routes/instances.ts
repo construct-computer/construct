@@ -4,7 +4,7 @@ import { jwt } from '@elysiajs/jwt'
 import { getUser } from '../services/auth.service'
 import { 
   containerManager, browserClient, agentClient, terminalServer, instances,
-  getDesktopWindows, browserStateCache,
+  getDesktopWindows, desktopState, browserStateCache, tinyfishStateCache,
   type Instance 
 } from '../services'
 import type { AgentConfig } from '../agent-client'
@@ -227,6 +227,12 @@ export const instanceRoutes = new Elysia({ prefix: '/instances' })
       terminalServer.destroyInstance(params.id)
       await browserClient.destroySession(params.id)
       agentClient.destroySession(params.id)
+
+      // Clear stale in-memory caches so the frontend doesn't get
+      // pre-reboot state (old tabs, windows, tinyfish overlay) on reconnect
+      desktopState.delete(params.id)
+      browserStateCache.delete(params.id)
+      tinyfishStateCache.delete(params.id)
 
       // Reboot container
       const container = await containerManager.rebootContainer(params.id)

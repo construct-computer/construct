@@ -279,6 +279,7 @@ interface ComputerStore {
   setBrowserFrame: (frameBase64: string) => void;
   switchTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
+  newTab: (url?: string) => void;
   navigateTo: (url: string) => void;
   
   // Event handlers
@@ -831,11 +832,25 @@ export const useComputerStore = create<ComputerStore>()(
       });
     },
     
+    newTab: (url) => {
+      browserWS.sendAction({ type: 'newTab', ...(url ? { url } : {}) });
+      // Server will broadcast updated tabs — no optimistic update needed
+      // since the tab ID is generated server-side
+    },
+    
     navigateTo: (url) => {
-      browserWS.sendAction({ type: 'navigate', url });
+      const { browserState } = get();
+      // If no tabs exist yet (first open), use newTab instead of navigate
+      // so the container creates a tab and broadcasts frame + tabs
+      if (browserState.tabs.length === 0) {
+        browserWS.sendAction({ type: 'newTab', url });
+      } else {
+        browserWS.sendAction({ type: 'navigate', url });
+      }
       set({
         browserState: {
-          ...get().browserState,
+          ...browserState,
+          url,
           isLoading: true,
         },
       });

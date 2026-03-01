@@ -56,12 +56,92 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
 RUN npm install -g agent-browser && agent-browser install && chmod -R o+rx /opt/browsers
 
+# ── Anti-detection: Replace Playwright's chromiumSwitches with stock-Chrome-like flags ──
+# Playwright's default chromiumSwitches add ~30 distinctive flags and disabled
+# features that serve as a unique fingerprint (e.g. --disable-back-forward-cache,
+# --force-color-profile=srgb, --allow-pre-commit-input, and features like
+# BoundaryEventDispatchTracksNodeRemoval, PaintHolding, RenderDocument, etc.).
+# Google's client-side JS can detect these through behavioral differences.
+# We replace the ENTIRE switches function with a minimal set that:
+#   - Keeps flags needed for Playwright's CDP pipe to work
+#   - Removes all Playwright-specific fingerprinting flags
+#   - Disables AutomationControlled but NOT other Playwright-specific features
+#   - Does NOT add --enable-automation
+# Write the patched chromiumSwitches.js to a temp location using COPY heredoc,
+# then move it into place over the Playwright original.
+COPY <<'SWITCHEOF' /tmp/chromiumSwitches.patched.js
+"use strict";
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+var chromiumSwitches_exports = {};
+__export(chromiumSwitches_exports, {
+  chromiumSwitches: () => chromiumSwitches
+});
+module.exports = __toCommonJS(chromiumSwitches_exports);
+// PATCHED: Minimal switches that look like stock Chrome, not Playwright.
+// Only keep flags strictly needed for Playwright's CDP pipe transport.
+const chromiumSwitches = (assistantMode, channel, android) => [
+  "--no-first-run",
+  "--no-default-browser-check",
+  "--disable-background-networking",
+  "--disable-breakpad",
+  "--disable-dev-shm-usage",
+  "--disable-infobars",
+  "--password-store=basic",
+  "--use-mock-keychain",
+  "--no-service-autorun",
+  "--metrics-recording-only",
+  "--disable-blink-features=AutomationControlled",
+  android ? "" : "--disable-sync",
+].filter(Boolean);
+0 && (module.exports = {
+  chromiumSwitches
+});
+SWITCHEOF
+RUN SWITCHES_FILE=$(find /usr/local/lib/node_modules/agent-browser -path "*/chromium/chromiumSwitches.js" -print -quit) && \
+    if [ -n "$SWITCHES_FILE" ]; then \
+      cp "$SWITCHES_FILE" "${SWITCHES_FILE}.bak" && \
+      cp /tmp/chromiumSwitches.patched.js "$SWITCHES_FILE" && \
+      echo "[Dockerfile] chromiumSwitches replaced: $SWITCHES_FILE" && \
+      ! grep -q '"--enable-automation"' "$SWITCHES_FILE" && \
+      ! grep -q 'BoundaryEventDispatchTracksNodeRemoval' "$SWITCHES_FILE" && \
+      echo "[Dockerfile] Verification passed — no Playwright fingerprint flags"; \
+    else \
+      echo "[Dockerfile] WARNING: chromiumSwitches.js not found" && exit 1; \
+    fi
+
+# ── Anti-detection: Remove --enable-unsafe-swiftshader from Playwright's chromium.js ──
+# This flag is added by Playwright when not on macOS with GPU. It's not present in
+# stock Chrome and signals automation to Google's BotGuard.
+RUN CHROMIUM_JS=$(find /usr/local/lib/node_modules/agent-browser -path "*/chromium/chromium.js" -print -quit) && \
+    if [ -n "$CHROMIUM_JS" ]; then \
+      cp "$CHROMIUM_JS" "${CHROMIUM_JS}.bak" && \
+      sed -i 's/chromeArguments.push("--enable-unsafe-swiftshader");//g' "$CHROMIUM_JS" && \
+      echo "[Dockerfile] Removed --enable-unsafe-swiftshader from chromium.js"; \
+    fi
+
 # agent-browser stream server port (WebSocket screencast)
 ENV AGENT_BROWSER_STREAM_PORT=9224
 
 
-# Timezone — must match the browser context timezoneId for consistency
-ENV TZ=America/New_York
+# Timezone — should ideally match the container's external IP geolocation.
+# Override at runtime with -e TZ=<timezone> if needed.
+ENV TZ=Asia/Kolkata
 
 # Create sandbox user (use UID 1001 to avoid conflict with node user)
 RUN useradd -m -s /bin/bash -u 1001 sandbox && \
@@ -71,15 +151,14 @@ RUN useradd -m -s /bin/bash -u 1001 sandbox && \
     echo 'sandbox ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/sandbox && \
     chmod 0440 /etc/sudoers.d/sandbox
 
-# agent-browser config — passed to Chromium at launch time.
-# - fake media devices: provides virtual camera/mic so Google Meet (and similar)
-#   can call getUserMedia() and get working audio/video streams.
-# - disable AutomationControlled: removes navigator.webdriver=true at the C++ level.
-# - autoplay policy: allow media autoplay without user gesture (needed for WebRTC).
-RUN mkdir -p /home/sandbox/.agent-browser && \
-    echo '{"args":"--use-fake-device-for-media-stream,--use-fake-ui-for-media-stream,--disable-blink-features=AutomationControlled,--autoplay-policy=no-user-gesture-required"}' \
+# agent-browser config — minimal config; Chrome args and profile are now
+# passed via IPC from browser-server.ts (which sends a `launch` command
+# with a proper JSON args array, preserving commas in --disable-features).
+# The config.json only needs to exist for agent-browser to recognize the session.
+RUN mkdir -p /home/sandbox/.agent-browser /home/sandbox/.chrome-profile && \
+    echo '{}' \
     > /home/sandbox/.agent-browser/config.json && \
-    chown -R sandbox:sandbox /home/sandbox/.agent-browser
+    chown -R sandbox:sandbox /home/sandbox/.agent-browser /home/sandbox/.chrome-profile
 
 # Install global npm packages
 RUN npm install -g typescript ts-node nodemon

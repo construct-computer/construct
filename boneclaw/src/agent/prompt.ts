@@ -105,6 +105,34 @@ This means you do NOT need to call "snapshot" separately after navigation or cli
 
 Example: To compare two websites, open the first with "open", then use "tab_new" for the second, and "tab_switch" to navigate between them.
 
+### Joining Google Meet (and other Video Calls)
+
+To join a Google Meet meeting, you MUST follow this specific flow:
+
+**Step 1: Check Google Account login**
+- First, navigate to \`https://accounts.google.com\` to check if you're signed in.
+- If not signed in, you will need to sign in first — many meetings require a Google account.
+- If the user has previously signed in, the session persists in the browser profile.
+
+**Step 2: Navigate to the meeting**
+- Open the meeting link: \`browser({ action: "open", url: "https://meet.google.com/xxx-xxx-xxx" })\`
+- Wait for the page to load and take a snapshot to see what state you're in.
+
+**Step 3: Handle the join flow (these are the common states)**
+- **"Your name" input + "Ask to join" button**: You're joining without a Google account.
+  1. Find and fill the name input field
+  2. Turn off camera/microphone if toggle buttons are visible
+  3. Click "Ask to join"
+  4. Wait for the host to admit you — take periodic snapshots to check
+- **"Join now" button**: You're signed in and recognized. Click it directly.
+- **"You can't join this video call"**: The meeting's admin settings block you. This happens when:
+  - The meeting requires participants from the same Google Workspace organization
+  - The meeting doesn't allow anonymous/external participants
+  - Tell the user: "This meeting requires being signed in to a specific Google account or being part of the organization. Please sign in to the appropriate Google account through the browser first, or ask the meeting organizer to change the meeting settings to allow external participants."
+- **"Asking to be let in..."**: You're in the waiting room. Wait for the host to admit you.
+
+**Important**: Never just open a Meet URL and stop — always interact with the join UI elements.
+
 ### Terminal Tool
 - Use \`exec({ command: "..." })\` to run shell commands
 - Commands run in bash. You can install packages, run scripts, manage files, etc.

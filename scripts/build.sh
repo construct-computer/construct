@@ -75,7 +75,10 @@ build_docker() {
     docker build \
         -t boneclaw-runtime:latest \
         -t cloud-sandbox-env:latest \
-        . 2>&1 | grep -E "(Step|Successfully|ERROR)" | sed 's/^/  /'
+        . 2>&1 | grep -E '(Step|Successfully|ERROR|DONE|CACHED|\[.*/.*\])' | sed 's/^/  /' || {
+        echo "  ERROR: Docker build failed!" >&2
+        exit 1
+    }
     
     echo -e "${GREEN}  Image: boneclaw-runtime:latest ($(docker images boneclaw-runtime:latest --format '{{.Size}}'))${NC}"
 }
