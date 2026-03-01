@@ -9,6 +9,7 @@ import type { Tool, ToolResult, ToolContext } from './types';
 import { sendServiceRequest } from '../server';
 
 type SlackAction =
+  // Core
   | 'status'
   | 'list_channels'
   | 'list_members'
@@ -17,7 +18,36 @@ type SlackAction =
   | 'read_history'
   | 'send_message'
   | 'add_reaction'
-  | 'upload_file';
+  | 'upload_file'
+  // Message management
+  | 'update_message'
+  | 'delete_message'
+  | 'schedule_message'
+  | 'list_scheduled'
+  | 'delete_scheduled'
+  // Channel management
+  | 'create_channel'
+  | 'archive_channel'
+  | 'invite_to_channel'
+  | 'kick_from_channel'
+  | 'set_topic'
+  | 'set_purpose'
+  // Pins
+  | 'pin_message'
+  | 'unpin_message'
+  | 'list_pins'
+  // Bookmarks
+  | 'add_bookmark'
+  | 'list_bookmarks'
+  | 'remove_bookmark'
+  // User groups
+  | 'list_usergroups'
+  | 'get_usergroup_members'
+  // Canvas
+  | 'create_canvas'
+  | 'edit_canvas'
+  // Search
+  | 'search_messages';
 
 async function slackHandler(
   args: Record<string, unknown>,
@@ -145,13 +175,127 @@ function formatSlackResult(action: SlackAction, data: unknown): string {
       return `Message sent to ${channel || 'channel'}.${ts ? ` (ts: ${ts})` : ''}`;
     }
 
-    case 'add_reaction': {
-      return `Reaction added successfully.`;
+    case 'update_message':
+      return `Message updated successfully.`;
+
+    case 'delete_message':
+      return `Message deleted successfully.`;
+
+    case 'schedule_message': {
+      const postAt = d.post_at as number | undefined;
+      const time = postAt ? new Date(postAt * 1000).toLocaleString() : 'scheduled time';
+      const id = d.scheduled_message_id as string | undefined;
+      return `Message scheduled for ${time}.${id ? ` (id: ${id})` : ''}`;
     }
 
-    case 'upload_file': {
-      return `File uploaded to Slack successfully.`;
+    case 'list_scheduled': {
+      const msgs = d.scheduled_messages as Array<Record<string, unknown>> | undefined;
+      if (!msgs || msgs.length === 0) return 'No scheduled messages.';
+      const lines = msgs.map((m) => {
+        const postAt = m.post_at as number;
+        const time = postAt ? new Date(postAt * 1000).toLocaleString() : '?';
+        const text = ((m.text as string) || '').slice(0, 80);
+        return `  [${time}] ${text} (id: ${m.id})`;
+      });
+      return `Scheduled messages (${msgs.length}):\n${lines.join('\n')}`;
     }
+
+    case 'delete_scheduled':
+      return `Scheduled message deleted.`;
+
+    case 'create_channel': {
+      const ch = d.channel as Record<string, unknown> | undefined;
+      return ch ? `Channel #${ch.name} created (id: ${ch.id}).` : 'Channel created.';
+    }
+
+    case 'archive_channel':
+      return `Channel archived.`;
+
+    case 'invite_to_channel':
+      return `User(s) invited to channel.`;
+
+    case 'kick_from_channel':
+      return `User removed from channel.`;
+
+    case 'set_topic':
+      return `Channel topic updated.`;
+
+    case 'set_purpose':
+      return `Channel purpose updated.`;
+
+    case 'pin_message':
+      return `Message pinned.`;
+
+    case 'unpin_message':
+      return `Message unpinned.`;
+
+    case 'list_pins': {
+      const pins = d.items as Array<Record<string, unknown>> | undefined;
+      if (!pins || pins.length === 0) return 'No pinned items in this channel.';
+      const lines = pins.map((p) => {
+        const msg = p.message as Record<string, unknown> | undefined;
+        const text = ((msg?.text as string) || '').slice(0, 100);
+        const user = msg?.user_name || msg?.user || 'unknown';
+        return `  ${user}: ${text}`;
+      });
+      return `Pinned items (${pins.length}):\n${lines.join('\n')}`;
+    }
+
+    case 'add_bookmark':
+      return `Bookmark added.`;
+
+    case 'list_bookmarks': {
+      const bookmarks = d.bookmarks as Array<Record<string, unknown>> | undefined;
+      if (!bookmarks || bookmarks.length === 0) return 'No bookmarks in this channel.';
+      const lines = bookmarks.map((b) => `  ${b.title} — ${b.link} (id: ${b.id})`);
+      return `Bookmarks (${bookmarks.length}):\n${lines.join('\n')}`;
+    }
+
+    case 'remove_bookmark':
+      return `Bookmark removed.`;
+
+    case 'list_usergroups': {
+      const groups = d.usergroups as Array<Record<string, unknown>> | undefined;
+      if (!groups || groups.length === 0) return 'No user groups found.';
+      const lines = groups.map((g) => {
+        const count = g.user_count !== undefined ? ` [${g.user_count} members]` : '';
+        return `  @${g.handle} — ${g.name}${count} (id: ${g.id})`;
+      });
+      return `User groups (${groups.length}):\n${lines.join('\n')}`;
+    }
+
+    case 'get_usergroup_members': {
+      const users = d.users as string[] | undefined;
+      if (!users || users.length === 0) return 'No members in this user group.';
+      return `User group members (${users.length}): ${users.join(', ')}`;
+    }
+
+    case 'create_canvas': {
+      const canvasId = d.canvas_id as string | undefined;
+      return `Canvas created.${canvasId ? ` (id: ${canvasId})` : ''}`;
+    }
+
+    case 'edit_canvas':
+      return `Canvas edited successfully.`;
+
+    case 'search_messages': {
+      const results = d.results as Array<Record<string, unknown>> | undefined;
+      if (!results || results.length === 0) return 'No messages found matching the search query.';
+      const lines = results.map((m) => {
+        const ch = m.channel_name || m.channel || '?';
+        const user = m.user_name || m.user || 'unknown';
+        const time = m.time || '';
+        const text = ((m.text as string) || '').slice(0, 200);
+        return `  [#${ch} ${time}] ${user}: ${text}`;
+      });
+      return `Search results (${results.length}):\n${lines.join('\n')}`;
+    }
+
+    case 'add_reaction':
+      return `Reaction added successfully.`;
+
+    case 'upload_file':
+      return `File uploaded to Slack successfully.`;
 
     default:
       return `Slack ${action} completed successfully.`;
@@ -164,10 +308,11 @@ export const slackTool: Tool = {
     function: {
       name: 'slack',
       description:
-        'Interact with the user\'s connected Slack workspace. You can list channels and members, ' +
-        'read message history, send messages, react to messages, tag people, and upload files. ' +
-        'Use action "status" to check if Slack is connected before other operations. ' +
-        'When sending messages, you can @mention users with <@USER_ID> syntax.',
+        'Interact with the user\'s connected Slack workspace. You can manage channels, send/schedule/update/delete messages, ' +
+        'read history, search messages, manage pins and bookmarks, create canvases, list user groups, ' +
+        'react to messages, tag people, and upload files. Use action "status" to check connectivity first. ' +
+        'When sending messages, use <@USER_ID> to mention users and <!subteam^GROUP_ID> to mention user groups. ' +
+        'Use "blocks" parameter with Block Kit JSON to send interactive messages with buttons/menus.',
       parameters: {
         type: 'object',
         properties: {
@@ -176,57 +321,118 @@ export const slackTool: Tool = {
             description: 'The Slack operation to perform.',
             enum: [
               'status',
-              'list_channels',
-              'list_members',
-              'get_channel_info',
-              'get_user_info',
-              'read_history',
-              'send_message',
-              'add_reaction',
-              'upload_file',
+              'list_channels', 'list_members', 'get_channel_info', 'get_user_info',
+              'read_history', 'search_messages',
+              'send_message', 'update_message', 'delete_message',
+              'schedule_message', 'list_scheduled', 'delete_scheduled',
+              'create_channel', 'archive_channel', 'invite_to_channel', 'kick_from_channel',
+              'set_topic', 'set_purpose',
+              'add_reaction', 'upload_file',
+              'pin_message', 'unpin_message', 'list_pins',
+              'add_bookmark', 'list_bookmarks', 'remove_bookmark',
+              'list_usergroups', 'get_usergroup_members',
+              'create_canvas', 'edit_canvas',
             ],
           },
           channel: {
             type: 'string',
             description:
-              'Channel name (without #) or channel ID. ' +
-              'Required for: list_members, get_channel_info, read_history, send_message, upload_file.',
+              'Channel name (without #) or channel ID. Required for most channel-specific actions.',
           },
           text: {
             type: 'string',
             description:
-              'Message text. Required for send_message. ' +
+              'Message text. Required for send_message, schedule_message. ' +
               'Use <@USER_ID> to mention users. Supports Slack mrkdwn formatting.',
+          },
+          blocks: {
+            type: 'string',
+            description:
+              'JSON string of Block Kit blocks for interactive messages (buttons, menus, etc). ' +
+              'Used with send_message and update_message. See Slack Block Kit docs for format.',
           },
           thread_ts: {
             type: 'string',
-            description:
-              'Thread timestamp to reply in a thread. For send_message and read_history.',
-          },
-          user: {
-            type: 'string',
-            description:
-              'User name or user ID. Required for get_user_info.',
-          },
-          emoji: {
-            type: 'string',
-            description:
-              'Emoji name without colons (e.g. "thumbsup"). Required for add_reaction.',
+            description: 'Thread timestamp to reply in a thread. For send_message, read_history.',
           },
           timestamp: {
             type: 'string',
             description:
-              'Message timestamp. Required for add_reaction (the message to react to).',
+              'Message timestamp. Required for: update_message, delete_message, add_reaction, pin_message, unpin_message.',
+          },
+          user: {
+            type: 'string',
+            description: 'User name or user ID. For get_user_info, invite_to_channel, kick_from_channel.',
+          },
+          users: {
+            type: 'string',
+            description: 'Comma-separated user IDs. For invite_to_channel (multiple users).',
+          },
+          emoji: {
+            type: 'string',
+            description: 'Emoji name without colons (e.g. "thumbsup"). Required for add_reaction.',
+          },
+          topic: {
+            type: 'string',
+            description: 'Channel topic text. Required for set_topic.',
+          },
+          purpose: {
+            type: 'string',
+            description: 'Channel purpose text. Required for set_purpose.',
+          },
+          name: {
+            type: 'string',
+            description:
+              'For create_channel: channel name (lowercase, hyphens, underscores, max 80 chars). ' +
+              'For add_bookmark: bookmark title.',
+          },
+          is_private: {
+            type: 'boolean',
+            description: 'For create_channel: whether to create a private channel.',
+          },
+          post_at: {
+            type: 'number',
+            description: 'Unix timestamp for when to send. Required for schedule_message.',
+          },
+          scheduled_message_id: {
+            type: 'string',
+            description: 'ID of scheduled message. Required for delete_scheduled.',
+          },
+          link: {
+            type: 'string',
+            description: 'URL for add_bookmark.',
+          },
+          bookmark_id: {
+            type: 'string',
+            description: 'Bookmark ID for remove_bookmark.',
+          },
+          usergroup_id: {
+            type: 'string',
+            description: 'User group ID. Required for get_usergroup_members.',
+          },
+          title: {
+            type: 'string',
+            description: 'For create_canvas: canvas title.',
+          },
+          content: {
+            type: 'string',
+            description: 'For create_canvas/edit_canvas: markdown content.',
+          },
+          canvas_id: {
+            type: 'string',
+            description: 'Canvas ID. Required for edit_canvas.',
+          },
+          query: {
+            type: 'string',
+            description: 'Search query text. Required for search_messages.',
           },
           file_path: {
             type: 'string',
-            description:
-              'Absolute path to a file in the container to upload. Required for upload_file.',
+            description: 'Absolute path to a file in the container. Required for upload_file.',
           },
           limit: {
             type: 'number',
-            description:
-              'Number of results to return. For read_history (default 20) and list_channels (default 100).',
+            description: 'Number of results to return (default varies by action).',
           },
         },
         required: ['action'],

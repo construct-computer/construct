@@ -77,6 +77,18 @@ export class SlackManager {
       }
     })
 
+    // Slash commands (e.g. /ask, /construct)
+    this.socketClient.on('slash_commands', async ({ body, ack }) => {
+      await ack()
+      await this.handleSlashCommand(body)
+    })
+
+    // Interactive messages (button clicks, menu selections, modals)
+    this.socketClient.on('interactive', async ({ body, ack }) => {
+      await ack()
+      await this.handleInteractiveAction(body)
+    })
+
     // Start the connection
     try {
       await this.socketClient.start()
@@ -152,6 +164,172 @@ export class SlackManager {
     if (event.bot_id || event.subtype === 'bot_message') return
 
     await this.processMessage(teamId, channelId, text, user, ts, threadTs)
+  }
+
+  private async handleSlashCommand(body: Record<string, unknown>): Promise<void> {
+    if (!this.agentClient || !this.instances) return
+
+    const teamId = body.team_id as string
+    const channelId = body.channel_id as string
+    const userId = body.user_id as string
+    const userName = body.user_name as string || 'Someone'
+    const command = body.command as string
+    const text = body.text as string || ''
+    const responseUrl = body.response_url as string
+
+    const installation = getSlackInstallationByTeam(teamId)
+    if (!installation) return
+
+    const instanceId = installation.userId
+    const instance = this.instances.get(instanceId)
+    if (!instance || instance.status !== 'running') {
+      // Respond via response_url
+      if (responseUrl) {
+        await fetch(responseUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            response_type: 'ephemeral',
+            text: 'Sorry, the agent is not currently running. Please start it from construct.computer first.',
+          }),
+        })
+      }
+      return
+    }
+
+    const webClient = this.webClients.get(teamId)
+
+    // Resolve channel name
+    let channelName = channelId
+    if (webClient) {
+      try {
+        const chInfo = await webClient.conversations.info({ channel: channelId })
+        channelName = ((chInfo.channel as Record<string, unknown>)?.name as string) || channelId
+      } catch { /* ignore */ }
+    }
+
+    const sessionKey = `slack_cmd_${nanoid(12)}`
+    const formattedMessage =
+      `[Slack command ${command} in #${channelName} | ${userName} | user_id: ${userId} | channel: ${channelId}]: ${text}`
+
+    try {
+      const response = await this.agentClient.sendMessage(instanceId, formattedMessage, sessionKey)
+      const slackText = markdownToMrkdwn(response)
+
+      if (responseUrl) {
+        const chunks = splitMessage(slackText, 3000)
+        // First chunk goes to response_url
+        await fetch(responseUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ response_type: 'in_channel', text: chunks[0] }),
+        })
+        // Additional chunks as follow-ups
+        if (webClient && chunks.length > 1) {
+          for (const chunk of chunks.slice(1)) {
+            await webClient.chat.postMessage({ channel: channelId, text: chunk })
+          }
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[Slack] Slash command failed for team ${teamId}:`, msg)
+      if (responseUrl) {
+        await fetch(responseUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ response_type: 'ephemeral', text: `Error: ${msg.slice(0, 200)}` }),
+        })
+      }
+    }
+  }
+
+  private async handleInteractiveAction(body: Record<string, unknown>): Promise<void> {
+    if (!this.agentClient || !this.instances) return
+
+    const type = body.type as string
+    // Handle block_actions (button clicks, menu selections)
+    if (type !== 'block_actions') return
+
+    const teamId = (body.team as Record<string, unknown>)?.id as string
+    if (!teamId) return
+
+    const installation = getSlackInstallationByTeam(teamId)
+    if (!installation) return
+
+    const instanceId = installation.userId
+    const instance = this.instances.get(instanceId)
+    if (!instance || instance.status !== 'running') return
+
+    const webClient = this.webClients.get(teamId)
+    if (!webClient) return
+
+    const user = body.user as Record<string, unknown>
+    const userName = (user?.real_name || user?.name || 'Someone') as string
+    const slackUserId = user?.id as string
+
+    const channel = body.channel as Record<string, unknown>
+    const channelId = channel?.id as string
+    const channelName = (channel?.name || channelId) as string
+
+    const message = body.message as Record<string, unknown>
+    const messageTs = message?.ts as string
+
+    const actions = body.actions as Array<Record<string, unknown>> || []
+    if (actions.length === 0) return
+
+    // Format each action into a readable message for the agent
+    const actionDescriptions = actions.map((a) => {
+      const actionId = a.action_id as string || 'unknown'
+      const actionType = a.type as string || 'button'
+      const text = (a.text as Record<string, unknown>)?.text as string || ''
+      const value = a.value as string || ''
+      const selectedOption = a.selected_option as Record<string, unknown>
+      if (selectedOption) {
+        const optText = (selectedOption.text as Record<string, unknown>)?.text as string || ''
+        const optValue = selectedOption.value as string || ''
+        return `selected "${optText}" (value: ${optValue}) from ${actionType} "${actionId}"`
+      }
+      return `clicked ${actionType} "${text || actionId}" (value: ${value}, action_id: ${actionId})`
+    })
+
+    const threadTs = messageTs || undefined
+    let sessionKey: string
+    if (threadTs) {
+      const existing = getSlackThreadSession(teamId, channelId, threadTs)
+      if (existing) {
+        sessionKey = existing.sessionKey
+      } else {
+        sessionKey = `slack_interactive_${nanoid(12)}`
+        saveSlackThreadSession({ teamId, channelId, threadTs, sessionKey })
+      }
+    } else {
+      sessionKey = `slack_interactive_${nanoid(12)}`
+    }
+
+    const formattedMessage =
+      `[Slack #${channelName} | ${userName} (@${slackUserId}) | interactive action | channel: ${channelId} | message_ts: ${messageTs || 'N/A'}]: ` +
+      `User ${actionDescriptions.join('; ')}`
+
+    try {
+      const response = await this.agentClient.sendMessage(instanceId, formattedMessage, sessionKey)
+      const slackText = markdownToMrkdwn(response)
+
+      // Reply in thread if possible
+      if (channelId) {
+        const chunks = splitMessage(slackText, 3000)
+        for (const chunk of chunks) {
+          await webClient.chat.postMessage({
+            channel: channelId,
+            thread_ts: threadTs,
+            text: chunk,
+          })
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[Slack] Interactive action handler failed:`, msg)
+    }
   }
 
   private async processMessage(

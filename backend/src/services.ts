@@ -402,24 +402,391 @@ async function handleSlackServiceRequest(
         if (!sendChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
 
         const text = params.text as string
-        if (!text) return { success: false, error: 'text is required' }
+        if (!text && !params.blocks) return { success: false, error: 'text or blocks is required' }
 
         const msgParams: Record<string, unknown> = {
           channel: sendChannelId,
-          text,
+          text: text || '',
         }
-        if (params.thread_ts) {
-          msgParams.thread_ts = params.thread_ts
+        if (params.thread_ts) msgParams.thread_ts = params.thread_ts
+        if (params.blocks) {
+          try {
+            msgParams.blocks = typeof params.blocks === 'string'
+              ? JSON.parse(params.blocks as string) : params.blocks
+          } catch { return { success: false, error: 'Invalid blocks JSON' } }
         }
         const result = await webClient.chat.postMessage(msgParams as unknown as Parameters<typeof webClient.chat.postMessage>[0])
         return {
           success: true,
+          data: { channel: params.channel, ts: result.ts, thread_ts: params.thread_ts },
+        }
+      }
+
+      case 'update_message': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const updChannelId = await resolveChannel(webClient, params.channel as string)
+        if (!updChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
+        const updTs = params.timestamp as string
+        if (!updTs) return { success: false, error: 'timestamp is required' }
+
+        const updParams: Record<string, unknown> = {
+          channel: updChannelId,
+          ts: updTs,
+          text: (params.text as string) || '',
+        }
+        if (params.blocks) {
+          try {
+            updParams.blocks = typeof params.blocks === 'string'
+              ? JSON.parse(params.blocks as string) : params.blocks
+          } catch { return { success: false, error: 'Invalid blocks JSON' } }
+        }
+        await webClient.chat.update(updParams as unknown as Parameters<typeof webClient.chat.update>[0])
+        return { success: true, data: {} }
+      }
+
+      case 'delete_message': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const delChannelId = await resolveChannel(webClient, params.channel as string)
+        if (!delChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
+        const delTs = params.timestamp as string
+        if (!delTs) return { success: false, error: 'timestamp is required' }
+        await webClient.chat.delete({ channel: delChannelId, ts: delTs })
+        return { success: true, data: {} }
+      }
+
+      case 'schedule_message': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const schedChannelId = await resolveChannel(webClient, params.channel as string)
+        if (!schedChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
+        const schedText = params.text as string
+        if (!schedText) return { success: false, error: 'text is required' }
+        const postAt = params.post_at as number
+        if (!postAt) return { success: false, error: 'post_at (unix timestamp) is required' }
+
+        const schedResult = await webClient.chat.scheduleMessage({
+          channel: schedChannelId,
+          text: schedText,
+          post_at: postAt,
+        })
+        return {
+          success: true,
           data: {
+            scheduled_message_id: schedResult.scheduled_message_id,
+            post_at: schedResult.post_at,
             channel: params.channel,
-            ts: result.ts,
-            thread_ts: params.thread_ts,
           },
         }
+      }
+
+      case 'list_scheduled': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const schedListParams: Record<string, unknown> = {}
+        if (params.channel) {
+          const ch = await resolveChannel(webClient, params.channel as string)
+          if (ch) schedListParams.channel = ch
+        }
+        const listResult = await webClient.chat.scheduledMessages.list(
+          schedListParams as unknown as Parameters<typeof webClient.chat.scheduledMessages.list>[0]
+        )
+        const scheduled = (listResult.scheduled_messages || []).map((m) => {
+          const msg = m as unknown as Record<string, unknown>
+          return { id: msg.id, post_at: msg.post_at, text: msg.text, channel_id: msg.channel_id }
+        })
+        return { success: true, data: { scheduled_messages: scheduled } }
+      }
+
+      case 'delete_scheduled': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const delSchedChannelId = await resolveChannel(webClient, params.channel as string)
+        if (!delSchedChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
+        const schedMsgId = params.scheduled_message_id as string
+        if (!schedMsgId) return { success: false, error: 'scheduled_message_id is required' }
+        await webClient.chat.deleteScheduledMessage({
+          channel: delSchedChannelId,
+          scheduled_message_id: schedMsgId,
+        })
+        return { success: true, data: {} }
+      }
+
+      // ── Channel management ──
+
+      case 'create_channel': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const chName = params.name as string
+        if (!chName) return { success: false, error: 'name is required' }
+        const createResult = await webClient.conversations.create({
+          name: chName,
+          is_private: !!params.is_private,
+        })
+        const newCh = createResult.channel as unknown as Record<string, unknown>
+        return {
+          success: true,
+          data: { channel: { id: newCh?.id, name: newCh?.name } },
+        }
+      }
+
+      case 'archive_channel': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const archChannelId = await resolveChannel(webClient, params.channel as string)
+        if (!archChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
+        await webClient.conversations.archive({ channel: archChannelId })
+        return { success: true, data: {} }
+      }
+
+      case 'invite_to_channel': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const invChannelId = await resolveChannel(webClient, params.channel as string)
+        if (!invChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
+        // Accept single user or comma-separated list
+        let userIds: string[] = []
+        if (params.users) {
+          userIds = (params.users as string).split(',').map(s => s.trim())
+        } else if (params.user) {
+          const uid = await resolveUser(webClient, params.user as string)
+          if (uid) userIds = [uid]
+        }
+        if (userIds.length === 0) return { success: false, error: 'user or users is required' }
+        await webClient.conversations.invite({ channel: invChannelId, users: userIds.join(',') })
+        return { success: true, data: {} }
+      }
+
+      case 'kick_from_channel': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const kickChannelId = await resolveChannel(webClient, params.channel as string)
+        if (!kickChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
+        const kickUserId = await resolveUser(webClient, params.user as string)
+        if (!kickUserId) return { success: false, error: `User "${params.user}" not found` }
+        await webClient.conversations.kick({ channel: kickChannelId, user: kickUserId })
+        return { success: true, data: {} }
+      }
+
+      case 'set_topic': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const topicChannelId = await resolveChannel(webClient, params.channel as string)
+        if (!topicChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
+        const topicText = params.topic as string
+        if (topicText === undefined) return { success: false, error: 'topic is required' }
+        await webClient.conversations.setTopic({ channel: topicChannelId, topic: topicText })
+        return { success: true, data: {} }
+      }
+
+      case 'set_purpose': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const purposeChannelId = await resolveChannel(webClient, params.channel as string)
+        if (!purposeChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
+        const purposeText = params.purpose as string
+        if (purposeText === undefined) return { success: false, error: 'purpose is required' }
+        await webClient.conversations.setPurpose({ channel: purposeChannelId, purpose: purposeText })
+        return { success: true, data: {} }
+      }
+
+      // ── Pins ──
+
+      case 'pin_message': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const pinChannelId = await resolveChannel(webClient, params.channel as string)
+        if (!pinChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
+        const pinTs = params.timestamp as string
+        if (!pinTs) return { success: false, error: 'timestamp is required' }
+        await webClient.pins.add({ channel: pinChannelId, timestamp: pinTs })
+        return { success: true, data: {} }
+      }
+
+      case 'unpin_message': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const unpinChannelId = await resolveChannel(webClient, params.channel as string)
+        if (!unpinChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
+        const unpinTs = params.timestamp as string
+        if (!unpinTs) return { success: false, error: 'timestamp is required' }
+        await webClient.pins.remove({ channel: unpinChannelId, timestamp: unpinTs })
+        return { success: true, data: {} }
+      }
+
+      case 'list_pins': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const pinsChannelId = await resolveChannel(webClient, params.channel as string)
+        if (!pinsChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
+        const pinsResult = await webClient.pins.list({ channel: pinsChannelId })
+        const items = (pinsResult.items || []).map((item) => {
+          const i = item as unknown as Record<string, unknown>
+          const msg = i.message as Record<string, unknown> | undefined
+          return { message: msg ? { text: msg.text, user: msg.user, ts: msg.ts } : null }
+        })
+        // Enrich with user names
+        for (const item of items) {
+          if (item.message?.user) {
+            try {
+              const info = await webClient.users.info({ user: item.message.user as string })
+              const u = info.user as Record<string, unknown>;
+              (item.message as Record<string, unknown>).user_name = u?.real_name || u?.name
+            } catch { /* ignore */ }
+          }
+        }
+        return { success: true, data: { items } }
+      }
+
+      // ── Bookmarks ──
+
+      case 'add_bookmark': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const bmChannelId = await resolveChannel(webClient, params.channel as string)
+        if (!bmChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
+        const bmTitle = params.name as string
+        const bmLink = params.link as string
+        if (!bmTitle || !bmLink) return { success: false, error: 'name and link are required' }
+        await webClient.bookmarks.add({
+          channel_id: bmChannelId,
+          title: bmTitle,
+          type: 'link',
+          link: bmLink,
+        })
+        return { success: true, data: {} }
+      }
+
+      case 'list_bookmarks': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const bmListChannelId = await resolveChannel(webClient, params.channel as string)
+        if (!bmListChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
+        const bmResult = await webClient.bookmarks.list({ channel_id: bmListChannelId })
+        const bookmarks = (bmResult.bookmarks || []).map((b) => {
+          const bm = b as unknown as Record<string, unknown>
+          return { id: bm.id, title: bm.title, link: bm.link }
+        })
+        return { success: true, data: { bookmarks } }
+      }
+
+      case 'remove_bookmark': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const bmRemChannelId = await resolveChannel(webClient, params.channel as string)
+        if (!bmRemChannelId) return { success: false, error: `Channel "${params.channel}" not found` }
+        const bmId = params.bookmark_id as string
+        if (!bmId) return { success: false, error: 'bookmark_id is required' }
+        await webClient.bookmarks.remove({ channel_id: bmRemChannelId, bookmark_id: bmId })
+        return { success: true, data: {} }
+      }
+
+      // ── User groups ──
+
+      case 'list_usergroups': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const ugResult = await webClient.usergroups.list({ include_count: true, include_users: false })
+        const usergroups = (ugResult.usergroups || []).map((ug) => {
+          const g = ug as unknown as Record<string, unknown>
+          return {
+            id: g.id,
+            name: g.name,
+            handle: g.handle,
+            description: g.description,
+            user_count: g.user_count,
+            is_active: !(g.date_delete as number),
+          }
+        })
+        return { success: true, data: { usergroups } }
+      }
+
+      case 'get_usergroup_members': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const ugId = params.usergroup_id as string
+        if (!ugId) return { success: false, error: 'usergroup_id is required' }
+        const ugMembers = await webClient.usergroups.users.list({ usergroup: ugId })
+        return { success: true, data: { users: ugMembers.users || [] } }
+      }
+
+      // ── Canvas ──
+
+      case 'create_canvas': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const canvasTitle = params.title as string || 'Untitled'
+        const canvasContent = params.content as string || ''
+        const canvasParams: Record<string, unknown> = {
+          title: canvasTitle,
+        }
+        if (canvasContent) {
+          canvasParams.document_content = { type: 'markdown', markdown: canvasContent }
+        }
+        if (params.channel) {
+          const canvasChId = await resolveChannel(webClient, params.channel as string)
+          if (canvasChId) canvasParams.channel_id = canvasChId
+        }
+        const canvasResult = await (webClient as unknown as Record<string, CallableFunction>)['canvases.create'](canvasParams)
+        const cr = canvasResult as Record<string, unknown>
+        return { success: true, data: { canvas_id: cr.canvas_id } }
+      }
+
+      case 'edit_canvas': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const editCanvasId = params.canvas_id as string
+        if (!editCanvasId) return { success: false, error: 'canvas_id is required' }
+        const editContent = params.content as string
+        if (!editContent) return { success: false, error: 'content is required' }
+        await (webClient as unknown as Record<string, CallableFunction>)['canvases.edit']({
+          canvas_id: editCanvasId,
+          changes: [{ operation: 'insert_at_end', document_content: { type: 'markdown', markdown: editContent } }],
+        })
+        return { success: true, data: {} }
+      }
+
+      // ── Search (workaround: iterate channel histories) ──
+
+      case 'search_messages': {
+        if (!webClient) return { success: false, error: 'No Slack connection' }
+        const searchQuery = (params.query as string || '').toLowerCase()
+        if (!searchQuery) return { success: false, error: 'query is required' }
+        const searchLimit = (params.limit as number) || 20
+
+        // If a specific channel is given, search just that channel
+        const channelsToSearch: string[] = []
+        if (params.channel) {
+          const chId = await resolveChannel(webClient, params.channel as string)
+          if (chId) channelsToSearch.push(chId)
+        } else {
+          // Search all channels the bot is in
+          const chList = await webClient.conversations.list({
+            types: 'public_channel,private_channel',
+            exclude_archived: true,
+            limit: 50,
+          })
+          for (const ch of (chList.channels || [])) {
+            const c = ch as unknown as Record<string, unknown>
+            if (c.is_member) channelsToSearch.push(c.id as string)
+          }
+        }
+
+        const allResults: Array<Record<string, unknown>> = []
+        for (const chId of channelsToSearch) {
+          if (allResults.length >= searchLimit) break
+          try {
+            const hist = await webClient.conversations.history({
+              channel: chId,
+              limit: 100,
+            })
+            for (const msg of (hist.messages || [])) {
+              const m = msg as unknown as Record<string, unknown>
+              const text = (m.text as string || '').toLowerCase()
+              if (text.includes(searchQuery)) {
+                allResults.push({ ...m, channel: chId })
+                if (allResults.length >= searchLimit) break
+              }
+            }
+          } catch {
+            // Bot may not have access to this channel
+          }
+        }
+
+        // Enrich with user names and channel names
+        const enriched = await enrichMessages(webClient, allResults)
+        // Add channel names
+        for (let i = 0; i < enriched.length; i++) {
+          const chId = (allResults[i] as Record<string, unknown>).channel as string
+          try {
+            const chInfo = await webClient.conversations.info({ channel: chId })
+            const ch = chInfo.channel as unknown as Record<string, unknown>
+            enriched[i].channel_name = ch?.name
+          } catch {
+            enriched[i].channel_name = chId
+          }
+        }
+        return { success: true, data: { results: enriched } }
       }
 
       case 'add_reaction': {
