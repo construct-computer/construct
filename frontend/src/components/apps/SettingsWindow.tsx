@@ -28,7 +28,7 @@ import { useComputerStore } from '@/stores/agentStore';
 import { useWindowStore } from '@/stores/windowStore';
 import { useDriveSync } from '@/hooks/useDriveSync';
 import { useSound } from '@/hooks/useSound';
-import { getSlackConfigured, getSlackStatus, disconnectSlack, getSlackInstallUrl, type SlackStatus } from '@/services/api';
+import { getSlackConfigured, getSlackStatus, type SlackStatus } from '@/services/api';
 import { MENUBAR_HEIGHT, DOCK_HEIGHT } from '@/lib/constants';
 import type { WindowConfig } from '@/types';
 
@@ -61,9 +61,6 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
   // Slack state
   const [slackConfigured, setSlackConfigured] = useState(false);
   const [slackStatus, setSlackStatus] = useState<SlackStatus | null>(null);
-  const [slackConnecting, setSlackConnecting] = useState(false);
-  const [slackDisconnecting, setSlackDisconnecting] = useState(false);
-
   useEffect(() => {
     getSlackConfigured().then((r) => {
       if (r.success && r.data.configured) {
@@ -74,31 +71,6 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
       }
     });
   }, []);
-
-  const handleSlackConnect = async () => {
-    setSlackConnecting(true);
-    const result = await getSlackInstallUrl();
-    setSlackConnecting(false);
-    if (result.success && result.data.url) {
-      window.open(result.data.url, '_blank');
-      // Poll for connection
-      const poll = setInterval(async () => {
-        const status = await getSlackStatus();
-        if (status.success && status.data.connected) {
-          clearInterval(poll);
-          setSlackStatus(status.data);
-        }
-      }, 3000);
-      setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
-    }
-  };
-
-  const handleSlackDisconnect = async () => {
-    setSlackDisconnecting(true);
-    await disconnectSlack();
-    setSlackDisconnecting(false);
-    setSlackStatus({ configured: true, connected: false });
-  };
 
   // Subscribe to computer events when running
   useEffect(() => {
@@ -326,21 +298,22 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
           )}
         </div>
 
-        {/* AI Configuration */}
+        {/* Services */}
         <div className="border border-[var(--color-border)] rounded-lg p-4 bg-[var(--color-surface-raised)]">
           <h3 className="text-sm font-medium text-[var(--color-text-muted)] mb-3 flex items-center gap-2">
-            <Cpu className="w-4 h-4" />
-            AI Configuration
+            <Wand2 className="w-4 h-4" />
+            Services
           </h3>
 
-          {/* Status summary */}
           {configChecked && (
             <div className="space-y-1.5 mb-3">
-              {[
-                { label: 'OpenRouter', configured: hasApiKey, required: true },
-                { label: 'TinyFish', configured: hasTinyfishKey },
-                { label: 'AgentMail', configured: hasAgentmailKey },
-              ].map((s) => (
+              {([
+                { label: 'OpenRouter', configured: hasApiKey, required: true, show: true },
+                { label: 'TinyFish', configured: hasTinyfishKey, show: true },
+                { label: 'AgentMail', configured: hasAgentmailKey, show: true },
+                { label: 'Google Drive', configured: driveSync.status.connected, show: driveSync.isConfigured },
+                { label: 'Slack', configured: !!slackStatus?.connected, show: slackConfigured },
+              ] as const).filter(s => s.show).map((s) => (
                 <div key={s.label} className="flex items-center justify-between text-xs">
                   <span>{s.label}</span>
                   <span className={`flex items-center gap-1 ${s.configured ? 'text-[var(--color-success)]' : 'text-[var(--color-text-muted)]'}`}>
@@ -368,146 +341,6 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
             Configure Services...
           </Button>
         </div>
-        
-        {/* Google Drive */}
-        {driveSync.isConfigured && (
-          <div className="border border-[var(--color-border)] rounded-lg p-4 bg-[var(--color-surface-raised)]">
-            <h3 className="text-sm font-medium text-[var(--color-text-muted)] mb-3 flex items-center gap-2">
-              <Cloud className="w-4 h-4" />
-              Google Drive
-            </h3>
-            {driveSync.status.connected ? (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
-                      <p className="text-xs font-medium">Connected</p>
-                    </div>
-                    {driveSync.status.email && (
-                      <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{driveSync.status.email}</p>
-                    )}
-                    {driveSync.status.lastSync && (
-                      <p className="text-[11px] text-[var(--color-text-subtle)] mt-0.5">
-                        Last sync: {new Date(driveSync.status.lastSync).toLocaleString()}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    onClick={driveSync.sync}
-                    disabled={driveSync.isSyncing}
-                    className="flex-1"
-                  >
-                    {driveSync.isSyncing ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                        Syncing...
-                      </>
-                    ) : (
-                      'Sync Now'
-                    )}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="default"
-                    onClick={driveSync.disconnect}
-                  >
-                    <Unplug className="w-4 h-4" />
-                  </Button>
-                </div>
-                {driveSync.lastReport && (
-                  <p className="text-xs text-[var(--color-text-muted)]">
-                    {driveSync.lastReport.downloaded.length} downloaded, {driveSync.lastReport.uploaded.length} uploaded
-                    {driveSync.lastReport.conflicts.length > 0 && `, ${driveSync.lastReport.conflicts.length} conflicts`}
-                  </p>
-                )}
-                {driveSync.error && (
-                  <p className="text-xs text-red-400">{driveSync.error}</p>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  Connect your Google Drive to sync files between your workspace and the cloud.
-                </p>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  onClick={driveSync.connect}
-                  className="w-full"
-                >
-                  Connect Google Drive
-                </Button>
-                {driveSync.error && (
-                  <p className="text-xs text-red-400">{driveSync.error}</p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Slack */}
-        {slackConfigured && (
-          <div className="border border-[var(--color-border)] rounded-lg p-4 bg-[var(--color-surface-raised)]">
-            <h3 className="text-sm font-medium text-[var(--color-text-muted)] mb-3 flex items-center gap-2">
-              <Hash className="w-4 h-4" />
-              Slack
-            </h3>
-            {slackStatus?.connected ? (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
-                      <p className="text-xs font-medium">Connected</p>
-                    </div>
-                    {slackStatus.teamName && (
-                      <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{slackStatus.teamName}</p>
-                    )}
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  variant="default"
-                  onClick={handleSlackDisconnect}
-                  disabled={slackDisconnecting}
-                  className="w-full"
-                >
-                  {slackDisconnecting ? (
-                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                  ) : (
-                    <Unplug className="w-4 h-4 mr-1" />
-                  )}
-                  Disconnect
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  Add your agent to a Slack workspace. Team members can @mention the bot to interact with it.
-                </p>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  onClick={handleSlackConnect}
-                  disabled={slackConnecting}
-                  className="w-full"
-                >
-                  {slackConnecting ? (
-                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                  ) : (
-                    <Hash className="w-4 h-4 mr-1" />
-                  )}
-                  Add to Slack
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
         
         <Separator />
       

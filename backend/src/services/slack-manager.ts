@@ -26,6 +26,7 @@ export class SlackManager {
   private agentClient: AgentClient | null = null
   private instances: Map<string, Instance> | null = null
   private webClients = new Map<string, WebClient>() // teamId → WebClient
+  private presenceInterval: ReturnType<typeof setInterval> | null = null
 
   get isConfigured(): boolean {
     return !!(config.slackClientId && config.slackClientSecret && config.slackAppToken)
@@ -93,6 +94,10 @@ export class SlackManager {
     try {
       await this.socketClient.start()
       console.log('[Slack] Socket Mode connected')
+
+      // Set bot presence to online and keep it alive with a periodic heartbeat
+      await this.setAllPresenceOnline()
+      this.presenceInterval = setInterval(() => this.setAllPresenceOnline(), 30 * 60 * 1000) // every 30 min
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       console.error('[Slack] Failed to start Socket Mode:', msg)
@@ -100,10 +105,26 @@ export class SlackManager {
   }
 
   /**
+   * Set presence to "auto" (online) for all installed workspaces.
+   */
+  private async setAllPresenceOnline(): Promise<void> {
+    for (const [teamId, webClient] of this.webClients) {
+      try {
+        await webClient.users.setPresence({ presence: 'auto' })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.warn(`[Slack] Failed to set presence for team ${teamId}:`, msg)
+      }
+    }
+  }
+
+  /**
    * Register a new installation's WebClient (called after OAuth completes).
    */
   registerInstallation(teamId: string, botToken: string): void {
-    this.webClients.set(teamId, new WebClient(botToken))
+    const webClient = new WebClient(botToken)
+    this.webClients.set(teamId, webClient)
+    webClient.users.setPresence({ presence: 'auto' }).catch(() => {})
     console.log(`[Slack] Registered WebClient for team ${teamId}`)
   }
 

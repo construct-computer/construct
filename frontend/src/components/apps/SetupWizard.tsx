@@ -171,7 +171,7 @@ function GridScreen({
 }) {
   const cards: { id: Screen; icon: React.ReactNode; name: string; desc: string; configured: boolean; required?: boolean; hidden?: boolean }[] = [
     {
-      id: 'openrouter',
+      id: 'openrouter' as const,
       icon: <Key className="w-5 h-5 text-[var(--color-text-muted)]" />,
       name: 'OpenRouter',
       desc: 'AI models',
@@ -179,28 +179,28 @@ function GridScreen({
       required: true,
     },
     {
-      id: 'tinyfish',
+      id: 'tinyfish' as const,
       icon: <Zap className="w-5 h-5 text-amber-500" />,
       name: 'TinyFish',
       desc: 'Cloud browser',
       configured: hasTinyfishKey,
     },
     {
-      id: 'drive',
+      id: 'drive' as const,
       icon: <Cloud className="w-5 h-5 text-green-500" />,
       name: 'Google Drive',
       desc: 'Cloud file sync',
       configured: driveConfigured,
     },
     {
-      id: 'agentmail',
+      id: 'agentmail' as const,
       icon: <Mail className="w-5 h-5 text-blue-500" />,
       name: 'AgentMail',
       desc: 'Send & receive email',
       configured: hasAgentmailKey,
     },
     {
-      id: 'slack',
+      id: 'slack' as const,
       icon: <Hash className="w-5 h-5 text-[#E01E5A]" />,
       name: 'Slack',
       desc: 'Chat with your agent',
