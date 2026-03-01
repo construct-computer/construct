@@ -22,6 +22,7 @@ import {
   fetchModelInfo,
   formatModelPrice,
   getDriveConfigured,
+  getDriveStatus,
   getDriveAuthUrl,
   getSlackConfigured,
   getSlackInstallUrl,
@@ -58,6 +59,7 @@ export function SetupWizard({ config, onComplete }: SetupWizardProps) {
 
   // Drive state (checked once on mount)
   const [driveConfigured, setDriveConfigured] = useState(false);
+  const [driveConnected, setDriveConnected] = useState(false);
   // Slack state
   const [slackConfigured, setSlackConfigured] = useState(false);
   const [slackConnected, setSlackConnected] = useState(false);
@@ -65,7 +67,12 @@ export function SetupWizard({ config, onComplete }: SetupWizardProps) {
 
   useEffect(() => {
     getDriveConfigured().then((r) => {
-      if (r.success) setDriveConfigured(r.data.configured);
+      if (r.success && r.data.configured) {
+        setDriveConfigured(true);
+        getDriveStatus().then((s) => {
+          if (s.success && s.data.connected) setDriveConnected(true);
+        });
+      }
     });
     getSlackConfigured().then((r) => {
       if (r.success && r.data.configured) {
@@ -91,6 +98,7 @@ export function SetupWizard({ config, onComplete }: SetupWizardProps) {
           hasTinyfishKey={hasTinyfishKey}
           hasAgentmailKey={hasAgentmailKey}
           driveConfigured={driveConfigured}
+          driveConnected={driveConnected}
           slackConfigured={slackConfigured}
           slackConnected={slackConnected}
           onSelect={setScreen}
@@ -131,9 +139,9 @@ export function SetupWizard({ config, onComplete }: SetupWizardProps) {
         />
       ) : screen === 'drive' ? (
         <DriveScreen
-          driveConfigured={driveConfigured}
+          driveConnected={driveConnected}
           onBack={goBack}
-          onConnected={() => setDriveConfigured(true)}
+          onConnected={() => setDriveConnected(true)}
         />
       ) : screen === 'slack' ? (
         <SlackScreen
@@ -155,6 +163,7 @@ function GridScreen({
   hasTinyfishKey,
   hasAgentmailKey,
   driveConfigured,
+  driveConnected,
   slackConfigured,
   slackConnected,
   onSelect,
@@ -164,6 +173,7 @@ function GridScreen({
   hasTinyfishKey: boolean;
   hasAgentmailKey: boolean;
   driveConfigured: boolean;
+  driveConnected: boolean;
   slackConfigured: boolean;
   slackConnected: boolean;
   onSelect: (s: Screen) => void;
@@ -190,7 +200,8 @@ function GridScreen({
       icon: <Cloud className="w-5 h-5 text-green-500" />,
       name: 'Google Drive',
       desc: 'Cloud file sync',
-      configured: driveConfigured,
+      configured: driveConnected,
+      hidden: !driveConfigured,
     },
     {
       id: 'agentmail' as const,
@@ -734,11 +745,11 @@ function AgentMailScreen({
 /* ─── Google Drive Screen ───────────────────────────────────── */
 
 function DriveScreen({
-  driveConfigured,
+  driveConnected,
   onBack,
   onConnected,
 }: {
-  driveConfigured: boolean;
+  driveConnected: boolean;
   onBack: () => void;
   onConnected: () => void;
 }) {
@@ -766,7 +777,7 @@ function DriveScreen({
         </Button>
       }
     >
-      {driveConfigured ? (
+      {driveConnected ? (
         <div className="flex items-center gap-2 text-xs text-[var(--color-success)] bg-[var(--color-success)]/10 border border-[var(--color-success)]/20 rounded-lg p-2.5">
           <Check className="w-3.5 h-3.5 shrink-0" />
           Google Drive is connected.

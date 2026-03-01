@@ -309,10 +309,10 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
             <div className="space-y-1.5 mb-3">
               {([
                 { label: 'OpenRouter', configured: hasApiKey, required: true, show: true },
-                { label: 'TinyFish', configured: hasTinyfishKey, show: true },
-                { label: 'AgentMail', configured: hasAgentmailKey, show: true },
-                { label: 'Google Drive', configured: driveSync.status.connected, show: driveSync.isConfigured },
-                { label: 'Slack', configured: !!slackStatus?.connected, show: slackConfigured },
+                { label: 'TinyFish', configured: hasTinyfishKey, required: false, show: true },
+                { label: 'AgentMail', configured: hasAgentmailKey, required: false, show: true },
+                { label: 'Google Drive', configured: driveSync.status.connected, required: false, show: driveSync.isConfigured },
+                { label: 'Slack', configured: !!slackStatus?.connected, required: false, show: slackConfigured },
               ] as const).filter(s => s.show).map((s) => (
                 <div key={s.label} className="flex items-center justify-between text-xs">
                   <span>{s.label}</span>

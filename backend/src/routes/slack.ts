@@ -38,8 +38,21 @@ export function createSlackRoutes(slackManager: SlackManager) {
     'im:read',
     'im:write',
     'channels:history',
+    'channels:read',
+    'channels:manage',
+    'groups:write',
+    'groups:read',
     'reactions:write',
+    'reactions:read',
     'users:read',
+    'usergroups:read',
+    'pins:read',
+    'pins:write',
+    'bookmarks:read',
+    'bookmarks:write',
+    'canvases:read',
+    'canvases:write',
+    'commands',
   ]
 
   return new Elysia({ prefix: '/slack' })

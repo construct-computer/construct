@@ -48,7 +48,7 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
   // ── Power-on handler ─────────────────────────────────────────────────
   const handlePowerOn = useCallback(() => {
     if (poweredOn) return;
-    setTimeout(() => play('startup', 0.5), 1250);
+    setTimeout(() => play('startup', 0.69), 1100);
     setPowerFading(true);
     // After the power button fades, start the sequence
     setTimeout(() => {
