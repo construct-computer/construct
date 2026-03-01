@@ -26,6 +26,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 \
     # Xvfb for non-headless mode (maximum stealth)
     xvfb \
+    # PulseAudio — virtual audio backend for WebRTC (Google Meet, Zoom, etc.)
+    pulseaudio \
     # General tools
     sudo \
     curl \
@@ -57,6 +59,7 @@ RUN npm install -g agent-browser && agent-browser install && chmod -R o+rx /opt/
 # agent-browser stream server port (WebSocket screencast)
 ENV AGENT_BROWSER_STREAM_PORT=9224
 
+
 # Timezone — must match the browser context timezoneId for consistency
 ENV TZ=America/New_York
 
@@ -68,8 +71,31 @@ RUN useradd -m -s /bin/bash -u 1001 sandbox && \
     echo 'sandbox ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/sandbox && \
     chmod 0440 /etc/sudoers.d/sandbox
 
+# agent-browser config — passed to Chromium at launch time.
+# - fake media devices: provides virtual camera/mic so Google Meet (and similar)
+#   can call getUserMedia() and get working audio/video streams.
+# - disable AutomationControlled: removes navigator.webdriver=true at the C++ level.
+# - autoplay policy: allow media autoplay without user gesture (needed for WebRTC).
+RUN mkdir -p /home/sandbox/.agent-browser && \
+    echo '{"args":"--use-fake-device-for-media-stream,--use-fake-ui-for-media-stream,--disable-blink-features=AutomationControlled,--autoplay-policy=no-user-gesture-required"}' \
+    > /home/sandbox/.agent-browser/config.json && \
+    chown -R sandbox:sandbox /home/sandbox/.agent-browser
+
 # Install global npm packages
 RUN npm install -g typescript ts-node nodemon
+
+# Configure PulseAudio system-wide so sandbox user can access it.
+# Creates a virtual speaker + microphone so WebRTC has audio devices.
+RUN mkdir -p /run/pulse && chmod 777 /run/pulse && \
+    (adduser sandbox pulse-access 2>/dev/null || usermod -a -G pulse-access sandbox 2>/dev/null || true) && \
+    mkdir -p /etc/pulse && \
+    printf '%s\n' \
+      'load-module module-native-protocol-unix auth-anonymous=1 socket=/run/pulse/native' \
+      'load-module module-null-sink sink_name=virtual_speaker sink_properties=device.description=Virtual_Speaker' \
+      'load-module module-null-source source_name=virtual_mic source_properties=device.description=Virtual_Microphone' \
+      'set-default-sink virtual_speaker' \
+      'set-default-source virtual_mic' \
+    > /etc/pulse/system.pa
 
 # Create browser-server directory and copy files
 WORKDIR /opt/browser-server
@@ -153,6 +179,15 @@ priority=5
 stdout_logfile=/var/log/supervisor/xvfb.log
 stderr_logfile=/var/log/supervisor/xvfb-error.log
 
+[program:pulseaudio]
+command=/usr/bin/pulseaudio --daemonize=no --system --disallow-exit --disallow-module-loading --log-target=stderr
+user=root
+autostart=true
+autorestart=true
+priority=6
+stdout_logfile=/var/log/supervisor/pulseaudio.log
+stderr_logfile=/var/log/supervisor/pulseaudio-error.log
+
 [program:tmux-session]
 command=/usr/bin/tmux new-session -d -s main -c /home/sandbox/workspace
 user=sandbox
@@ -172,7 +207,7 @@ autorestart=true
 priority=10
 stdout_logfile=/var/log/supervisor/browser-server.log
 stderr_logfile=/var/log/supervisor/browser-server-error.log
-environment=HOME="/home/sandbox",USER="sandbox",DISPLAY=":99",AGENT_BROWSER_STREAM_PORT="9224",PLAYWRIGHT_BROWSERS_PATH="/opt/browsers"
+environment=HOME="/home/sandbox",USER="sandbox",DISPLAY=":99",AGENT_BROWSER_STREAM_PORT="9224",PLAYWRIGHT_BROWSERS_PATH="/opt/browsers",PULSE_SERVER="/run/pulse/native"
 
 [program:boneclaw]
 command=/usr/local/bin/boneclaw --config /etc/boneclaw/config.yaml
@@ -181,7 +216,7 @@ autostart=true
 autorestart=true
 stdout_logfile=/var/log/supervisor/boneclaw.log
 stderr_logfile=/var/log/supervisor/boneclaw-error.log
-environment=HOME="/home/sandbox",USER="sandbox",DISPLAY=":99",AGENT_BROWSER_STREAM_PORT="9224",PLAYWRIGHT_BROWSERS_PATH="/opt/browsers",AGENT_BROWSER_SESSION="default"
+environment=HOME="/home/sandbox",USER="sandbox",DISPLAY=":99",AGENT_BROWSER_STREAM_PORT="9224",PLAYWRIGHT_BROWSERS_PATH="/opt/browsers",AGENT_BROWSER_SESSION="default",PULSE_SERVER="/run/pulse/native"
 EOF
 
 # Set workspace directory

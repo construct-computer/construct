@@ -14,11 +14,264 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { createServer } from 'http'
 import { execSync, spawn, type ChildProcess } from 'child_process'
 import { readFileSync, existsSync } from 'fs'
+import { connect as netConnect } from 'net'
 import WebSocketClient from 'ws'
 
 const PORT = 9222
 const AGENT_BROWSER_STREAM_PORT = 9224 // internal streaming port
 const VIEWPORT = { width: 1280, height: 720 }
+
+// ─── Browser stealth overrides ──────────────────────────────────────────────
+// Injected via `eval` after every navigation to make the headless browser
+// appear as a regular user's Chrome — fixes Google Meet and other sites
+// that fingerprint automation.
+
+const STEALTH_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.139 Safari/537.36'
+
+const STEALTH_SCRIPT = `(() => {
+  if (window.__stealthApplied) return;
+  window.__stealthApplied = true;
+
+  // 1. navigator.webdriver → false (on both instance AND prototype)
+  Object.defineProperty(navigator, 'webdriver', { get: () => false, configurable: true });
+  try {
+    // Also patch the prototype so 'webdriver' in navigator checks pass
+    const proto = Object.getPrototypeOf(navigator);
+    if (proto) {
+      Object.defineProperty(proto, 'webdriver', { get: () => false, configurable: true });
+    }
+  } catch {}
+
+  // 2. User-Agent override (removes "HeadlessChrome")
+  Object.defineProperty(navigator, 'userAgent', {
+    get: () => '${STEALTH_UA}'
+  });
+  Object.defineProperty(navigator, 'appVersion', {
+    get: () => '${STEALTH_UA.replace('Mozilla/', '')}'
+  });
+
+  // 3. Fake plugins (Chrome normally has 5)
+  // Use Object.create(PluginArray.prototype) so instanceof checks pass
+  Object.defineProperty(navigator, 'plugins', {
+    get: () => {
+      const fakePlugins = [
+        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1, item: () => null, namedItem: () => null, [Symbol.iterator]: function*(){} },
+        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '', length: 1, item: () => null, namedItem: () => null, [Symbol.iterator]: function*(){} },
+        { name: 'Native Client', filename: 'internal-nacl-plugin', description: '', length: 1, item: () => null, namedItem: () => null, [Symbol.iterator]: function*(){} },
+        { name: 'Chromium PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1, item: () => null, namedItem: () => null, [Symbol.iterator]: function*(){} },
+        { name: 'Chromium PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '', length: 1, item: () => null, namedItem: () => null, [Symbol.iterator]: function*(){} },
+      ];
+      const pluginArr = Object.create(PluginArray.prototype);
+      for (let i = 0; i < fakePlugins.length; i++) pluginArr[i] = fakePlugins[i];
+      Object.defineProperty(pluginArr, 'length', { get: () => fakePlugins.length });
+      pluginArr.item = (i) => fakePlugins[i] || null;
+      pluginArr.namedItem = (n) => fakePlugins.find(p => p.name === n) || null;
+      pluginArr.refresh = () => {};
+      pluginArr[Symbol.iterator] = function*() { for (const p of fakePlugins) yield p; };
+      return pluginArr;
+    }
+  });
+
+  // 4. Languages — clean (no @posix suffix)
+  Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+  Object.defineProperty(navigator, 'language', { get: () => 'en-US' });
+
+  // 5. Platform
+  Object.defineProperty(navigator, 'platform', { get: () => 'Linux x86_64' });
+
+  // 6. Hardware concurrency (real value, not 0)
+  Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 4 });
+
+  // 7. Device memory
+  Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+
+  // 8. Connection — mimic real network (use prototype override for read-only props)
+  if (navigator.connection) {
+    try {
+      const connProto = Object.getPrototypeOf(navigator.connection);
+      if (connProto) {
+        Object.defineProperty(connProto, 'rtt', { get: () => 50, configurable: true });
+      }
+    } catch {}
+    try {
+      Object.defineProperty(navigator.connection, 'rtt', { get: () => 50, configurable: true });
+    } catch {}
+  }
+
+  // 9. Fake media devices for WebRTC (Google Meet, Zoom, etc.)
+  if (navigator.mediaDevices) {
+    const origEnum = navigator.mediaDevices.enumerateDevices?.bind(navigator.mediaDevices);
+    navigator.mediaDevices.enumerateDevices = async () => {
+      try {
+        const real = origEnum ? await origEnum() : [];
+        if (real.length > 0) return real;
+      } catch {}
+      return [
+        { deviceId: 'default', kind: 'audioinput', label: 'Default', groupId: 'default', toJSON() { return this; } },
+        { deviceId: 'communications', kind: 'audioinput', label: 'Communications', groupId: 'comms', toJSON() { return this; } },
+        { deviceId: 'default', kind: 'videoinput', label: 'Integrated Camera', groupId: 'camera', toJSON() { return this; } },
+        { deviceId: 'default', kind: 'audiooutput', label: 'Default', groupId: 'default', toJSON() { return this; } },
+      ];
+    };
+  }
+
+  // 10. Permissions API — report granted for common permissions
+  if (navigator.permissions) {
+    const origQuery = navigator.permissions.query?.bind(navigator.permissions);
+    navigator.permissions.query = (desc) => {
+      const autoGrant = ['camera', 'microphone', 'notifications', 'geolocation'];
+      if (autoGrant.includes(desc.name)) {
+        return Promise.resolve({ state: 'granted', onchange: null, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => true });
+      }
+      return origQuery ? origQuery(desc) : Promise.resolve({ state: 'prompt', onchange: null, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => true });
+    };
+  }
+
+  // 11. WebGL vendor/renderer — look real
+  try {
+    const getParam = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(p) {
+      if (p === 37445) return 'Google Inc. (Intel)';
+      if (p === 37446) return 'ANGLE (Intel, Mesa Intel(R) UHD Graphics 630, OpenGL 4.6)';
+      return getParam.call(this, p);
+    };
+    if (typeof WebGL2RenderingContext !== 'undefined') {
+      const getParam2 = WebGL2RenderingContext.prototype.getParameter;
+      WebGL2RenderingContext.prototype.getParameter = function(p) {
+        if (p === 37445) return 'Google Inc. (Intel)';
+        if (p === 37446) return 'ANGLE (Intel, Mesa Intel(R) UHD Graphics 630, OpenGL 4.6)';
+        return getParam2.call(this, p);
+      };
+    }
+  } catch {}
+
+  // 12. Remove Playwright-injected __playwright properties
+  try { delete window.__playwright; } catch {}
+  try { delete window.__pw_manual; } catch {}
+
+  // 13. window.chrome — Real Chrome ALWAYS has this object
+  if (!window.chrome) {
+    window.chrome = {};
+  }
+  if (!window.chrome.runtime) {
+    window.chrome.runtime = {
+      connect: function() { return { onMessage: { addListener: function(){} }, postMessage: function(){}, onDisconnect: { addListener: function(){} } }; },
+      sendMessage: function() {},
+      onMessage: { addListener: function(){}, removeListener: function(){}, hasListeners: function() { return false; } },
+      onConnect: { addListener: function(){}, removeListener: function(){}, hasListeners: function() { return false; } },
+      id: undefined,
+    };
+  }
+  if (!window.chrome.app) {
+    window.chrome.app = {
+      isInstalled: false,
+      InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+      RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+      getDetails: function() { return null; },
+      getIsInstalled: function() { return false; },
+    };
+  }
+  if (!window.chrome.csi) {
+    window.chrome.csi = function() {
+      return {
+        startE: Date.now(),
+        onloadT: Date.now(),
+        pageT: performance.now(),
+        tran: 15,
+      };
+    };
+  }
+  if (!window.chrome.loadTimes) {
+    window.chrome.loadTimes = function() {
+      const perf = performance.timing;
+      return {
+        commitLoadTime: perf.responseStart / 1000,
+        connectionInfo: 'h2',
+        finishDocumentLoadTime: perf.domContentLoadedEventEnd / 1000,
+        finishLoadTime: perf.loadEventEnd / 1000,
+        firstPaintAfterLoadTime: 0,
+        firstPaintTime: perf.responseStart / 1000 + 0.05,
+        navigationType: 'Other',
+        npnNegotiatedProtocol: 'h2',
+        requestTime: perf.requestStart / 1000,
+        startLoadTime: perf.navigationStart / 1000,
+        wasAlternateProtocolAvailable: false,
+        wasFetchedViaSpdy: true,
+        wasNpnNegotiated: true,
+      };
+    };
+  }
+
+  // 14. Screen dimensions — should match Xvfb resolution (1920x1080), not viewport
+  Object.defineProperty(screen, 'width', { get: () => 1920, configurable: true });
+  Object.defineProperty(screen, 'height', { get: () => 1080, configurable: true });
+  Object.defineProperty(screen, 'availWidth', { get: () => 1920, configurable: true });
+  Object.defineProperty(screen, 'availHeight', { get: () => 1080, configurable: true });
+  Object.defineProperty(screen, 'colorDepth', { get: () => 24, configurable: true });
+  Object.defineProperty(screen, 'pixelDepth', { get: () => 24, configurable: true });
+
+  // 15. window.outerWidth/Height — in real browsers these include window chrome
+  // outerWidth > innerWidth (toolbar, scrollbar ~40px difference)
+  Object.defineProperty(window, 'outerWidth', { get: () => window.innerWidth + 16, configurable: true });
+  Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight + 88, configurable: true });
+
+  // 16. Notification.permission — should be "default" for a fresh profile, not "denied"
+  try {
+    Object.defineProperty(Notification, 'permission', { get: () => 'default', configurable: true });
+  } catch {}
+
+  // 17. Hairline features — further reduce fingerprint surface
+  // AudioContext: make createOscillator behave normally (not muted)
+  try {
+    const origCtx = window.AudioContext || window.webkitAudioContext;
+    if (origCtx) {
+      const origCreate = origCtx.prototype.createOscillator;
+      // No-op wrap — just ensure it exists and is callable
+      origCtx.prototype.createOscillator = function() { return origCreate.call(this); };
+    }
+  } catch {}
+})();`
+
+const STEALTH_SCRIPT_B64 = Buffer.from(STEALTH_SCRIPT).toString('base64')
+
+// Path to the agent-browser daemon Unix socket for the default session
+const DAEMON_SOCKET_PATH = '/home/sandbox/.agent-browser/default.sock'
+
+/**
+ * Send a command to the agent-browser daemon via its Unix socket.
+ * Returns the parsed JSON response or throws on error.
+ */
+function daemonCommand(cmd: Record<string, unknown>, timeoutMs = 5000): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const sock = netConnect(DAEMON_SOCKET_PATH)
+    let data = ''
+    const timer = setTimeout(() => { sock.destroy(); resolve({ success: true }) }, timeoutMs)
+
+    sock.on('connect', () => {
+      sock.write(JSON.stringify(cmd) + '\n')
+    })
+    sock.on('data', (chunk) => {
+      data += chunk.toString()
+      // Try to parse — the daemon sends a single JSON line
+      try {
+        const parsed = JSON.parse(data)
+        clearTimeout(timer)
+        sock.end()
+        resolve(parsed)
+      } catch { /* wait for more data */ }
+    })
+    sock.on('error', (e) => {
+      clearTimeout(timer)
+      reject(e)
+    })
+    sock.on('close', () => {
+      clearTimeout(timer)
+      if (data) {
+        try { resolve(JSON.parse(data)) } catch { resolve({ success: false, error: data }) }
+      }
+    })
+  })
+}
 
 // ─── System stats helpers ───────────────────────────────────────────────────
 
@@ -387,8 +640,6 @@ class BrowserServer {
       } catch { /* ignore */ }
 
       // Open the new-tab page (this auto-launches the daemon)
-      // --headed runs a real browser window on Xvfb (DISPLAY=:99) for max stealth —
-      // headless Chromium is trivially detectable by anti-bot systems.
       await agentBrowser([
         'open', NEW_TAB_HTML,
         '--headed',
@@ -398,10 +649,57 @@ class BrowserServer {
       // Set viewport
       await agentBrowser(['set', 'viewport', String(VIEWPORT.width), String(VIEWPORT.height)])
 
+      // Register stealth overrides as an init script — this runs BEFORE any page
+      // JavaScript on every navigation, which is critical for beating detection
+      // scripts that check navigator.webdriver etc. at page load time.
+      await this.registerStealthInitScript()
+
+      // Also inject into the current page immediately (for the initial about:blank/new-tab)
+      await this.injectStealth()
+
       console.log('[BrowserServer] agent-browser launched successfully')
     } catch (e) {
       console.error('[BrowserServer] Failed to launch agent-browser:', e)
       throw e
+    }
+  }
+
+  /**
+   * Register the stealth script as a Playwright addInitScript via the daemon socket.
+   * This ensures the script runs BEFORE any page JavaScript on every navigation —
+   * critical for defeating detection that runs at page load time.
+   * Also sets HTTP-level User-Agent header override.
+   */
+  private async registerStealthInitScript() {
+    try {
+      await daemonCommand({
+        id: `stealth-init-${Date.now()}`,
+        action: 'addinitscript',
+        script: STEALTH_SCRIPT,
+      })
+      console.log('[BrowserServer] Stealth init script registered')
+    } catch (e) {
+      console.warn('[BrowserServer] Failed to register stealth init script:', e)
+    }
+    // Override HTTP User-Agent header (JS override only changes navigator.userAgent,
+    // not the actual header sent with requests)
+    try {
+      await agentBrowser(['set', 'headers', JSON.stringify({ 'User-Agent': STEALTH_UA })], 5000)
+      console.log('[BrowserServer] HTTP User-Agent header overridden')
+    } catch {
+      // Non-fatal — some agent-browser versions may not support this
+    }
+  }
+
+  /**
+   * Inject stealth overrides into the current page via eval (fallback).
+   * Used for the initial page and as a safety net alongside addInitScript.
+   */
+  private async injectStealth() {
+    try {
+      await agentBrowser(['eval', '-b', STEALTH_SCRIPT_B64], 5000)
+    } catch {
+      // Non-fatal — page may not be ready yet
     }
   }
 
@@ -942,7 +1240,11 @@ class BrowserServer {
       ws.send(JSON.stringify({ type: 'ack', action }))
 
       if (PAGE_CHANGING_ACTIONS.has(action)) {
-        setTimeout(() => this.broadcastTabs().catch(() => {}), 500)
+        // Re-inject stealth overrides after navigation (they don't persist across pages)
+        setTimeout(() => {
+          this.injectStealth().catch(() => {})
+          this.broadcastTabs().catch(() => {})
+        }, 500)
       }
     } catch (e) {
       console.error(`[BrowserServer] Action ${action} failed:`, e)

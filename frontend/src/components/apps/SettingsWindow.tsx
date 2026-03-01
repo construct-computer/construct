@@ -1,10 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import {
   Moon,
   Sun,
   Volume2,
   VolumeX,
-  Key,
   Cpu,
   Loader2,
   Check,
@@ -20,23 +19,16 @@ import {
   Monitor,
   Terminal,
   MessageSquare,
+  Wand2,
 } from 'lucide-react';
-import { Button, Label, Checkbox, Separator, Input } from '@/components/ui';
+import { Button, Label, Checkbox, Separator } from '@/components/ui';
 import { useSettingsStore, WALLPAPERS, getWallpaperSrc } from '@/stores/settingsStore';
 import { useComputerStore } from '@/stores/agentStore';
 import { useWindowStore } from '@/stores/windowStore';
 import { useDriveSync } from '@/hooks/useDriveSync';
 import { useSound } from '@/hooks/useSound';
-import { validateOpenRouterKey } from '@/services/api';
+import { MENUBAR_HEIGHT, DOCK_HEIGHT } from '@/lib/constants';
 import type { WindowConfig } from '@/types';
-
-// OpenRouter models — must match SetupWizard choices
-const MODELS = [
-  { id: 'nvidia/nemotron-3-nano-30b-a3b:free', name: 'Nemotron Nano (Free)' },
-  { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
-  { id: 'moonshotai/kimi-k2.5', name: 'Kimi K2.5' },
-  { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B' },
-];
 
 interface SettingsWindowProps {
   config: WindowConfig;
@@ -56,7 +48,6 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
     hasTinyfishKey,
     hasAgentmailKey,
     configChecked,
-    updateComputer,
     fetchComputer,
     startComputer,
     stopComputer,
@@ -64,24 +55,6 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
   } = useComputerStore();
   const instanceId = useComputerStore((s) => s.instanceId);
   const driveSync = useDriveSync(instanceId);
-  
-  // AI configuration state
-  const [apiKey, setApiKey] = useState('');
-  const [tinyfishKey, setTinyfishKey] = useState('');
-  const [agentmailKey, setAgentmailKey] = useState('');
-  const [agentmailInboxUsername, setAgentmailInboxUsername] = useState('');
-  const [model, setModel] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  
-  // Load current config
-  useEffect(() => {
-    if (computer?.config) {
-      setModel(computer.config.model || 'nvidia/nemotron-3-nano-30b-a3b:free');
-      // Don't load the actual API key for security - just show placeholder
-    }
-  }, [computer?.config]);
 
   // Subscribe to computer events when running
   useEffect(() => {
@@ -89,51 +62,14 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
       subscribeToComputer();
     }
   }, [computer?.status, subscribeToComputer]);
-  
-  const handleSaveAI = async () => {
-    setIsSaving(true);
-    setSaveSuccess(false);
-    setSaveError(null);
-    
-    // Validate key against OpenRouter if one is being set
-    if (apiKey.trim()) {
-      const validation = await validateOpenRouterKey(apiKey.trim());
-      if (!validation.valid) {
-        setSaveError(validation.error || 'Invalid API key');
-        setIsSaving(false);
-        return;
-      }
-    }
-    
-    const updates: { openrouterApiKey?: string; tinyfishApiKey?: string; agentmailApiKey?: string; agentmailInboxUsername?: string; model?: string } = { model };
-    if (apiKey.trim()) {
-      updates.openrouterApiKey = apiKey.trim();
-    }
-    if (tinyfishKey.trim()) {
-      updates.tinyfishApiKey = tinyfishKey.trim();
-    }
-    if (agentmailKey.trim()) {
-      updates.agentmailApiKey = agentmailKey.trim();
-    }
-    if (agentmailInboxUsername.trim()) {
-      updates.agentmailInboxUsername = agentmailInboxUsername.trim();
-    }
-    
-    // updateComputer already calls checkConfigStatus + fetchComputer
-    const success = await updateComputer(updates);
-    
-    if (success) {
-      setSaveSuccess(true);
-      setApiKey('');
-      setTinyfishKey('');
-      setAgentmailKey('');
-      setAgentmailInboxUsername('');
-      setTimeout(() => setSaveSuccess(false), 2000);
-    } else {
-      setSaveError('Failed to save configuration');
-    }
-    
-    setIsSaving(false);
+
+  const handleOpenWizard = () => {
+    play('open');
+    const width = 560;
+    const height = 640;
+    const x = Math.max(0, (window.innerWidth - width) / 2);
+    const y = Math.max(MENUBAR_HEIGHT, (window.innerHeight - DOCK_HEIGHT - height) / 2);
+    openWindow('setup', { title: 'Welcome to construct.computer', x, y, width, height });
   };
 
   const handleStart = async () => {
@@ -352,222 +288,41 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
             <Cpu className="w-4 h-4" />
             AI Configuration
           </h3>
-          <div className="space-y-3">
-            {/* OpenRouter API Key */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <Label className="text-xs">OpenRouter API Key</Label>
-                {configChecked && (
-                  <span
-                    className={`flex items-center gap-1 text-[11px] ${
-                      hasApiKey
-                        ? 'text-[var(--color-success)]'
-                        : 'text-[var(--color-text-muted)]'
-                    }`}
-                  >
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full ${
-                        hasApiKey ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-muted)]'
-                      }`}
-                    />
-                    {hasApiKey ? 'Key set' : 'Not configured'}
-                  </span>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Key className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
-                  <Input
-                    type="text"
-                    autoComplete="off"
-                    data-1p-ignore
-                    data-lpignore="true"
-                    spellCheck={false}
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={hasApiKey ? '••••••••••••••••' : 'sk-or-...'}
-                    className="pl-8 text-sm"
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                Get your API key from{' '}
-                <a 
-                  href="https://openrouter.ai/keys" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="text-[var(--color-accent)] hover:underline"
-                >
-                  openrouter.ai/keys
-                </a>
-              </p>
-            </div>
-            
-            {/* TinyFish API Key */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <Label className="text-xs">TinyFish API Key</Label>
-                {configChecked && (
-                  <span
-                    className={`flex items-center gap-1 text-[11px] ${
-                      hasTinyfishKey
-                        ? 'text-[var(--color-success)]'
-                        : 'text-[var(--color-text-muted)]'
-                    }`}
-                  >
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full ${
-                        hasTinyfishKey ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-muted)]'
-                      }`}
-                    />
-                    {hasTinyfishKey ? 'Key set' : 'Optional'}
-                  </span>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Key className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
-                  <Input
-                    type="text"
-                    autoComplete="off"
-                    data-1p-ignore
-                    data-lpignore="true"
-                    spellCheck={false}
-                    value={tinyfishKey}
-                    onChange={(e) => setTinyfishKey(e.target.value)}
-                    placeholder={hasTinyfishKey ? '••••••••••••••••' : 'sk-tinyfish-...'}
-                    className="pl-8 text-sm"
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                Enables AI web scraping and research.{' '}
-                <a 
-                  href="https://agent.tinyfish.ai/api-keys" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="text-[var(--color-accent)] hover:underline"
-                >
-                  Get a key
-                </a>
-              </p>
-            </div>
-            
-            {/* AgentMail API Key */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <Label className="text-xs">AgentMail API Key</Label>
-                {configChecked && (
-                  <span
-                    className={`flex items-center gap-1 text-[11px] ${
-                      hasAgentmailKey
-                        ? 'text-[var(--color-success)]'
-                        : 'text-[var(--color-text-muted)]'
-                    }`}
-                  >
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full ${
-                        hasAgentmailKey ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-muted)]'
-                      }`}
-                    />
-                    {hasAgentmailKey ? 'Key set' : 'Optional'}
-                  </span>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Key className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
-                  <Input
-                    type="text"
-                    autoComplete="off"
-                    data-1p-ignore
-                    data-lpignore="true"
-                    spellCheck={false}
-                    value={agentmailKey}
-                    onChange={(e) => setAgentmailKey(e.target.value)}
-                    placeholder={hasAgentmailKey ? '••••••••••••••••' : 'am_...'}
-                    className="pl-8 text-sm"
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                Enables the agent to send and receive emails.{' '}
-                <a 
-                  href="https://agentmail.to" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="text-[var(--color-accent)] hover:underline"
-                >
-                  Get a key
-                </a>
-              </p>
-            </div>
-            
-            {/* AgentMail Inbox Username */}
-            {(hasAgentmailKey || agentmailKey.trim()) && (
-              <div>
-                <Label className="text-xs mb-1 block">Email Username</Label>
-                <Input
-                  type="text"
-                  autoComplete="off"
-                  data-1p-ignore
-                  data-lpignore="true"
-                  spellCheck={false}
-                  value={agentmailInboxUsername}
-                  onChange={(e) => setAgentmailInboxUsername(e.target.value)}
-                  placeholder="my-agent"
-                  className="text-sm"
-                />
-                <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                  Your agent's email will be <span className="font-mono">username@agentmail.to</span>. Leave blank for auto-generated.
-                </p>
-              </div>
-            )}
-            
-            {/* Model Selection */}
-            <div>
-              <Label className="text-xs mb-1 block">Model</Label>
-              <select
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className="w-full h-8 px-2 text-sm bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-input)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]/50"
-              >
-                {MODELS.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            
-            {/* Validation / save error */}
-            {saveError && (
-              <p className="text-xs text-[var(--color-error)]">{saveError}</p>
-            )}
 
-            {/* Save Button */}
-            <Button
-              size="sm"
-              variant="primary"
-              onClick={handleSaveAI}
-              disabled={isSaving}
-              className="w-full"
-            >
-              {isSaving ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                  Saving...
-                </>
-              ) : saveSuccess ? (
-                <>
-                  <Check className="w-4 h-4 mr-1" />
-                  Saved!
-                </>
-              ) : (
-                'Save AI Settings'
-              )}
-            </Button>
-          </div>
+          {/* Status summary */}
+          {configChecked && (
+            <div className="space-y-1.5 mb-3">
+              {[
+                { label: 'OpenRouter', configured: hasApiKey, required: true },
+                { label: 'TinyFish', configured: hasTinyfishKey },
+                { label: 'AgentMail', configured: hasAgentmailKey },
+              ].map((s) => (
+                <div key={s.label} className="flex items-center justify-between text-xs">
+                  <span>{s.label}</span>
+                  <span className={`flex items-center gap-1 ${s.configured ? 'text-[var(--color-success)]' : 'text-[var(--color-text-muted)]'}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${s.configured ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-muted)]'}`} />
+                    {s.configured ? 'Configured' : s.required ? 'Required' : 'Not set'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {computer?.config?.model && (
+            <p className="text-xs text-[var(--color-text-muted)] mb-3">
+              Model: {computer.config.model}
+            </p>
+          )}
+
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={handleOpenWizard}
+            className="w-full"
+          >
+            <Wand2 className="w-4 h-4 mr-1.5" />
+            Configure Services...
+          </Button>
         </div>
         
         {/* Google Drive */}
