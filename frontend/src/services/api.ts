@@ -538,6 +538,34 @@ export async function syncDrive(instanceId: string): Promise<ApiResult<DriveSync
   return request(`/drive/sync/${instanceId}`, { method: 'POST' });
 }
 
+// ============================================================================
+// Slack API
+// ============================================================================
+
+export interface SlackStatus {
+  configured: boolean;
+  connected: boolean;
+  teamName?: string;
+  teamId?: string;
+  installedAt?: number;
+}
+
+export async function getSlackConfigured(): Promise<ApiResult<{ configured: boolean }>> {
+  return request('/slack/configured');
+}
+
+export async function getSlackInstallUrl(): Promise<ApiResult<{ url?: string; error?: string }>> {
+  return request('/slack/install');
+}
+
+export async function getSlackStatus(): Promise<ApiResult<SlackStatus>> {
+  return request('/slack/status');
+}
+
+export async function disconnectSlack(): Promise<ApiResult<{ status: string }>> {
+  return request('/slack/disconnect', { method: 'DELETE' });
+}
+
 // Legacy function for compatibility
 export async function getComputer(): Promise<ApiResult<{ computer: AgentWithConfig }>> {
   // Map instance to legacy "computer" format

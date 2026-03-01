@@ -10,7 +10,7 @@ import { useWindowStore } from '@/stores/windowStore';
 import { useComputerStore } from '@/stores/agentStore';
 import { useNotificationStore } from '@/stores/notificationStore';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
-import { getDriveStatus } from '@/services/api';
+import { getDriveStatus, getSlackStatus } from '@/services/api';
 import { MENUBAR_HEIGHT, DOCK_HEIGHT, Z_INDEX } from '@/lib/constants';
 
 interface DesktopProps {
@@ -58,13 +58,14 @@ export function Desktop({ onLogout, onLockScreen, onRestart, isConnected }: Desk
     if (oauthHandledRef.current) return;
     const params = new URLSearchParams(window.location.search);
     const driveResult = params.get('drive');
-    if (!driveResult) return;
+    const slackResult = params.get('slack');
+    if (!driveResult && !slackResult) return;
 
     oauthHandledRef.current = true;
     window.history.replaceState({}, '', window.location.pathname);
 
+    // Google Drive OAuth result
     if (driveResult === 'connected') {
-      // Fetch status from API to get the email (URL param may be empty)
       getDriveStatus().then((result) => {
         const email = result.success ? result.data.email : undefined;
         addNotification({
@@ -79,6 +80,38 @@ export function Desktop({ onLogout, onLockScreen, onRestart, isConnected }: Desk
         title: 'Google Drive connection failed',
         body: driveResult === 'denied' ? 'Access was denied' : 'An error occurred',
         source: 'Google Drive',
+        variant: 'error',
+      });
+    }
+
+    // Slack OAuth result
+    if (slackResult === 'connected') {
+      getSlackStatus().then((result) => {
+        const teamName = result.success ? result.data.teamName : undefined;
+        addNotification({
+          title: 'Slack connected',
+          body: teamName ? `Added to ${teamName}` : 'Your Slack workspace is now linked',
+          source: 'Slack',
+          variant: 'success',
+        });
+      });
+    } else if (slackResult === 'denied' || slackResult === 'error') {
+      const slackError = params.get('slack_error');
+      let body = slackResult === 'denied' ? 'Access was denied' : 'An error occurred';
+      if (slackError) {
+        // Make Slack API error codes more readable
+        const friendlyErrors: Record<string, string> = {
+          bad_redirect_uri: 'Redirect URI mismatch — check SLACK_REDIRECT_URI matches the Slack app settings',
+          invalid_code: 'Authorization code expired — please try again',
+          access_denied: 'Access was denied by the user',
+          workspace_already_linked: 'This Slack workspace is already connected to another account',
+        };
+        body = friendlyErrors[slackError] || slackError.replace(/_/g, ' ');
+      }
+      addNotification({
+        title: 'Slack connection failed',
+        body,
+        source: 'Slack',
         variant: 'error',
       });
     }

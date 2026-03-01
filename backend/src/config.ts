@@ -20,6 +20,12 @@ export const config = {
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
   googleRedirectUri: process.env.GOOGLE_REDIRECT_URI || '',
   
+  // Slack App
+  slackClientId: process.env.SLACK_CLIENT_ID || '',
+  slackClientSecret: process.env.SLACK_CLIENT_SECRET || '',
+  slackAppToken: process.env.SLACK_APP_TOKEN || '', // xapp-... (Socket Mode)
+  slackRedirectUri: process.env.SLACK_REDIRECT_URI || '', // https://yourdomain/api/slack/callback
+  
   // Frontend URL (for OAuth redirect back)
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
   

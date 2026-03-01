@@ -5,11 +5,12 @@ import { initDatabase, closeDatabase } from './db/client';
 import { authRoutes } from './routes/auth';
 import { instanceRoutes } from './routes/instances';
 import { createDriveRoutes } from './routes/drive';
+import { createSlackRoutes } from './routes/slack';
 import { wsRoutes } from './ws/handler';
 import { 
   initializeServices, shutdownServices, 
   containerManager, browserClient, agentClient, instances,
-  driveService, driveSync,
+  driveService, driveSync, slackManager,
   type Instance
 } from './services';
 
@@ -78,6 +79,7 @@ const app = new Elysia()
       .use(authRoutes)
       .use(instanceRoutes)
       .use(createDriveRoutes(driveService, driveSync))
+      .use(createSlackRoutes(slackManager))
   )
   // WebSocket routes
   .use(wsRoutes)
@@ -143,6 +145,13 @@ console.log(`
     POST /api/drive/copy-to-drive/:id   - Container -> Drive
     POST /api/drive/copy-to-local/:id   - Drive -> Container
     POST /api/drive/sync/:id            - Two-way sync
+    
+  Slack:
+    GET  /api/slack/configured       - Check if Slack is configured
+    GET  /api/slack/install          - Get OAuth install URL
+    GET  /api/slack/callback         - OAuth callback (from Slack)
+    GET  /api/slack/status           - Connection status
+    DEL  /api/slack/disconnect       - Disconnect Slack
     
   WebSocket Endpoints:
     WS   /ws/browser/:instanceId - Browser screencast stream

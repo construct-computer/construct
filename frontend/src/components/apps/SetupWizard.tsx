@@ -11,6 +11,8 @@ import {
   Zap,
   Mail,
   Cloud,
+  Hash,
+  Unplug,
 } from 'lucide-react';
 import { Button, Input, Label } from '@/components/ui';
 import { useComputerStore } from '@/stores/agentStore';
@@ -21,7 +23,12 @@ import {
   formatModelPrice,
   getDriveConfigured,
   getDriveAuthUrl,
+  getSlackConfigured,
+  getSlackInstallUrl,
+  getSlackStatus,
+  disconnectSlack,
   type OpenRouterModelInfo,
+  type SlackStatus,
 } from '@/services/api';
 import type { WindowConfig } from '@/types';
 
@@ -33,7 +40,7 @@ const MODELS = [
   { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B', tag: null },
 ];
 
-type Screen = 'grid' | 'openrouter' | 'tinyfish' | 'agentmail' | 'drive';
+type Screen = 'grid' | 'openrouter' | 'tinyfish' | 'agentmail' | 'drive' | 'slack';
 
 interface SetupWizardProps {
   config: WindowConfig;
@@ -51,9 +58,26 @@ export function SetupWizard({ config, onComplete }: SetupWizardProps) {
 
   // Drive state (checked once on mount)
   const [driveConfigured, setDriveConfigured] = useState(false);
+  // Slack state
+  const [slackConfigured, setSlackConfigured] = useState(false);
+  const [slackConnected, setSlackConnected] = useState(false);
+  const [slackTeamName, setSlackTeamName] = useState('');
+
   useEffect(() => {
     getDriveConfigured().then((r) => {
       if (r.success) setDriveConfigured(r.data.configured);
+    });
+    getSlackConfigured().then((r) => {
+      if (r.success && r.data.configured) {
+        setSlackConfigured(true);
+        // Also check connection status
+        getSlackStatus().then((s) => {
+          if (s.success && s.data.connected) {
+            setSlackConnected(true);
+            setSlackTeamName(s.data.teamName || '');
+          }
+        });
+      }
     });
   }, []);
 
@@ -67,6 +91,8 @@ export function SetupWizard({ config, onComplete }: SetupWizardProps) {
           hasTinyfishKey={hasTinyfishKey}
           hasAgentmailKey={hasAgentmailKey}
           driveConfigured={driveConfigured}
+          slackConfigured={slackConfigured}
+          slackConnected={slackConnected}
           onSelect={setScreen}
           onDone={() => { closeWindow(config.id); onComplete?.(); }}
         />
@@ -109,6 +135,14 @@ export function SetupWizard({ config, onComplete }: SetupWizardProps) {
           onBack={goBack}
           onConnected={() => setDriveConfigured(true)}
         />
+      ) : screen === 'slack' ? (
+        <SlackScreen
+          slackConnected={slackConnected}
+          slackTeamName={slackTeamName}
+          onBack={goBack}
+          onConnected={(teamName) => { setSlackConnected(true); setSlackTeamName(teamName); }}
+          onDisconnected={() => { setSlackConnected(false); setSlackTeamName(''); }}
+        />
       ) : null}
     </div>
   );
@@ -121,6 +155,8 @@ function GridScreen({
   hasTinyfishKey,
   hasAgentmailKey,
   driveConfigured,
+  slackConfigured,
+  slackConnected,
   onSelect,
   onDone,
 }: {
@@ -128,10 +164,12 @@ function GridScreen({
   hasTinyfishKey: boolean;
   hasAgentmailKey: boolean;
   driveConfigured: boolean;
+  slackConfigured: boolean;
+  slackConnected: boolean;
   onSelect: (s: Screen) => void;
   onDone: () => void;
 }) {
-  const cards: { id: Screen; icon: React.ReactNode; name: string; desc: string; configured: boolean; required?: boolean }[] = [
+  const cards: { id: Screen; icon: React.ReactNode; name: string; desc: string; configured: boolean; required?: boolean; hidden?: boolean }[] = [
     {
       id: 'openrouter',
       icon: <Key className="w-5 h-5 text-[var(--color-text-muted)]" />,
@@ -161,7 +199,15 @@ function GridScreen({
       desc: 'Send & receive email',
       configured: hasAgentmailKey,
     },
-  ];
+    {
+      id: 'slack',
+      icon: <Hash className="w-5 h-5 text-[#E01E5A]" />,
+      name: 'Slack',
+      desc: 'Chat with your agent',
+      configured: slackConnected,
+      hidden: !slackConfigured,
+    },
+  ].filter((c) => !c.hidden);
 
   return (
     <>
@@ -734,6 +780,106 @@ function DriveScreen({
             {connecting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Cloud className="w-4 h-4 mr-2" />}
             Connect Google Drive
           </Button>
+        </div>
+      )}
+    </DetailShell>
+  );
+}
+
+/* --- Slack Screen --- */
+
+function SlackScreen({
+  slackConnected,
+  slackTeamName,
+  onBack,
+  onConnected,
+  onDisconnected,
+}: {
+  slackConnected: boolean;
+  slackTeamName: string;
+  onBack: () => void;
+  onConnected: (teamName: string) => void;
+  onDisconnected: () => void;
+}) {
+  const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleConnect = async () => {
+    setConnecting(true);
+    setError(null);
+    const result = await getSlackInstallUrl();
+    setConnecting(false);
+    if (result.success && result.data.url) {
+      window.open(result.data.url, '_blank');
+      // Poll for connection status (user will complete OAuth in new tab)
+      const poll = setInterval(async () => {
+        const status = await getSlackStatus();
+        if (status.success && status.data.connected) {
+          clearInterval(poll);
+          onConnected(status.data.teamName || '');
+        }
+      }, 3000);
+      // Stop polling after 5 minutes
+      setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
+    } else {
+      setError(result.success ? (result.data.error || 'Unknown error') : result.error);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    setDisconnecting(true);
+    await disconnectSlack();
+    setDisconnecting(false);
+    onDisconnected();
+  };
+
+  return (
+    <DetailShell
+      title="Slack"
+      icon={<Hash className="w-5 h-5 text-[#E01E5A]" />}
+      onBack={onBack}
+      footer={
+        <Button variant="ghost" className="w-full" onClick={onBack}>
+          Back
+        </Button>
+      }
+    >
+      {slackConnected ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-xs text-[var(--color-success)] bg-[var(--color-success)]/10 border border-[var(--color-success)]/20 rounded-lg p-2.5">
+            <Check className="w-3.5 h-3.5 shrink-0" />
+            Connected to <span className="font-medium">{slackTeamName || 'Slack workspace'}</span>
+          </div>
+          <p className="text-xs text-[var(--color-text-muted)]">
+            @mention the bot in any channel or DM it directly. Each thread creates a separate conversation with your agent.
+          </p>
+          <Button
+            variant="default"
+            size="sm"
+            className="w-full"
+            onClick={handleDisconnect}
+            disabled={disconnecting}
+          >
+            {disconnecting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Unplug className="w-4 h-4 mr-1" />}
+            Disconnect
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-sm text-[var(--color-text-muted)]">
+            Add your agent to a Slack workspace. Team members can @mention the bot to send messages to your agent and receive responses in threads.
+          </p>
+          <Button variant="primary" className="w-full" onClick={handleConnect} disabled={connecting}>
+            {connecting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Hash className="w-4 h-4 mr-2" />}
+            Add to Slack
+          </Button>
+          {error && (
+            <div className="flex items-center gap-2 text-xs text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg p-2.5">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              {error}
+            </div>
+          )}
         </div>
       )}
     </DetailShell>

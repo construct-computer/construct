@@ -56,6 +56,23 @@ export interface DriveToken {
   lastSync: string | null;
 }
 
+export interface SlackInstallation {
+  teamId: string;
+  teamName: string;
+  userId: string; // construct.computer user_id
+  botToken: string; // encrypted xoxb-...
+  botUserId: string; // Slack bot user ID (for stripping mentions)
+  installedAt: number;
+}
+
+export interface SlackThreadSession {
+  teamId: string;
+  channelId: string;
+  threadTs: string;
+  sessionKey: string; // boneclaw session key
+  createdAt: number;
+}
+
 // SQL schema for SQLite
 export const SQL_SCHEMA = `
 -- Users table
@@ -111,8 +128,29 @@ CREATE TABLE IF NOT EXISTS drive_tokens (
   last_sync TEXT
 );
 
+-- Slack installations (one per workspace, linked to a construct.computer user)
+CREATE TABLE IF NOT EXISTS slack_installations (
+  team_id TEXT PRIMARY KEY,
+  team_name TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  bot_token TEXT NOT NULL,
+  bot_user_id TEXT NOT NULL,
+  installed_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+);
+
+-- Slack thread → boneclaw session mapping
+CREATE TABLE IF NOT EXISTS slack_thread_sessions (
+  team_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  thread_ts TEXT NOT NULL,
+  session_key TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+  PRIMARY KEY (team_id, channel_id, thread_ts)
+);
+
 -- Create indexes
 CREATE INDEX IF NOT EXISTS idx_agents_user_id ON agents(user_id);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_agent_id ON activity_logs(agent_id);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_timestamp ON activity_logs(timestamp);
+CREATE INDEX IF NOT EXISTS idx_slack_installations_user_id ON slack_installations(user_id);
 `;

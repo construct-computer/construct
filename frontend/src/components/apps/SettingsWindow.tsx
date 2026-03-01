@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import {
   Moon,
   Sun,
@@ -20,13 +19,16 @@ import {
   Terminal,
   MessageSquare,
   Wand2,
+  Hash,
 } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { Button, Label, Checkbox, Separator } from '@/components/ui';
 import { useSettingsStore, WALLPAPERS, getWallpaperSrc } from '@/stores/settingsStore';
 import { useComputerStore } from '@/stores/agentStore';
 import { useWindowStore } from '@/stores/windowStore';
 import { useDriveSync } from '@/hooks/useDriveSync';
 import { useSound } from '@/hooks/useSound';
+import { getSlackConfigured, getSlackStatus, disconnectSlack, getSlackInstallUrl, type SlackStatus } from '@/services/api';
 import { MENUBAR_HEIGHT, DOCK_HEIGHT } from '@/lib/constants';
 import type { WindowConfig } from '@/types';
 
@@ -55,6 +57,48 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
   } = useComputerStore();
   const instanceId = useComputerStore((s) => s.instanceId);
   const driveSync = useDriveSync(instanceId);
+
+  // Slack state
+  const [slackConfigured, setSlackConfigured] = useState(false);
+  const [slackStatus, setSlackStatus] = useState<SlackStatus | null>(null);
+  const [slackConnecting, setSlackConnecting] = useState(false);
+  const [slackDisconnecting, setSlackDisconnecting] = useState(false);
+
+  useEffect(() => {
+    getSlackConfigured().then((r) => {
+      if (r.success && r.data.configured) {
+        setSlackConfigured(true);
+        getSlackStatus().then((s) => {
+          if (s.success) setSlackStatus(s.data);
+        });
+      }
+    });
+  }, []);
+
+  const handleSlackConnect = async () => {
+    setSlackConnecting(true);
+    const result = await getSlackInstallUrl();
+    setSlackConnecting(false);
+    if (result.success && result.data.url) {
+      window.open(result.data.url, '_blank');
+      // Poll for connection
+      const poll = setInterval(async () => {
+        const status = await getSlackStatus();
+        if (status.success && status.data.connected) {
+          clearInterval(poll);
+          setSlackStatus(status.data);
+        }
+      }, 3000);
+      setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
+    }
+  };
+
+  const handleSlackDisconnect = async () => {
+    setSlackDisconnecting(true);
+    await disconnectSlack();
+    setSlackDisconnecting(false);
+    setSlackStatus({ configured: true, connected: false });
+  };
 
   // Subscribe to computer events when running
   useEffect(() => {
@@ -401,6 +445,65 @@ export function SettingsWindow({ config: _config }: SettingsWindowProps) {
                 {driveSync.error && (
                   <p className="text-xs text-red-400">{driveSync.error}</p>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Slack */}
+        {slackConfigured && (
+          <div className="border border-[var(--color-border)] rounded-lg p-4 bg-[var(--color-surface-raised)]">
+            <h3 className="text-sm font-medium text-[var(--color-text-muted)] mb-3 flex items-center gap-2">
+              <Hash className="w-4 h-4" />
+              Slack
+            </h3>
+            {slackStatus?.connected ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
+                      <p className="text-xs font-medium">Connected</p>
+                    </div>
+                    {slackStatus.teamName && (
+                      <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{slackStatus.teamName}</p>
+                    )}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={handleSlackDisconnect}
+                  disabled={slackDisconnecting}
+                  className="w-full"
+                >
+                  {slackDisconnecting ? (
+                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                  ) : (
+                    <Unplug className="w-4 h-4 mr-1" />
+                  )}
+                  Disconnect
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Add your agent to a Slack workspace. Team members can @mention the bot to interact with it.
+                </p>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={handleSlackConnect}
+                  disabled={slackConnecting}
+                  className="w-full"
+                >
+                  {slackConnecting ? (
+                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                  ) : (
+                    <Hash className="w-4 h-4 mr-1" />
+                  )}
+                  Add to Slack
+                </Button>
               </div>
             )}
           </div>

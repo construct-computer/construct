@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { SQL_SCHEMA } from './schema';
-import type { User, Agent, AgentConfig, ActivityLog, DriveToken } from './schema';
+import type { User, Agent, AgentConfig, ActivityLog, DriveToken, SlackInstallation, SlackThreadSession } from './schema';
 import { nanoid } from 'nanoid';
 
 let db: Database | null = null;
@@ -314,6 +314,84 @@ export function updateDriveLastSync(userId: string, timestamp: string): void {
 
 export function deleteDriveTokens(userId: string): void {
   getDb().prepare('DELETE FROM drive_tokens WHERE user_id = ?').run(userId);
+}
+
+// ============= Slack Operations =============
+
+export function saveSlackInstallation(installation: {
+  teamId: string;
+  teamName: string;
+  userId: string;
+  botToken: string;
+  botUserId: string;
+}): void {
+  const stmt = getDb().prepare(`
+    INSERT OR REPLACE INTO slack_installations (team_id, team_name, user_id, bot_token, bot_user_id, installed_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(installation.teamId, installation.teamName, installation.userId, installation.botToken, installation.botUserId, Date.now());
+}
+
+export function getSlackInstallationByTeam(teamId: string): SlackInstallation | null {
+  const stmt = getDb().prepare(`
+    SELECT team_id as teamId, team_name as teamName, user_id as userId,
+           bot_token as botToken, bot_user_id as botUserId, installed_at as installedAt
+    FROM slack_installations WHERE team_id = ?
+  `);
+  return stmt.get(teamId) as SlackInstallation | null;
+}
+
+export function getSlackInstallationByUser(userId: string): SlackInstallation | null {
+  const stmt = getDb().prepare(`
+    SELECT team_id as teamId, team_name as teamName, user_id as userId,
+           bot_token as botToken, bot_user_id as botUserId, installed_at as installedAt
+    FROM slack_installations WHERE user_id = ?
+  `);
+  return stmt.get(userId) as SlackInstallation | null;
+}
+
+export function getAllSlackInstallations(): SlackInstallation[] {
+  const stmt = getDb().prepare(`
+    SELECT team_id as teamId, team_name as teamName, user_id as userId,
+           bot_token as botToken, bot_user_id as botUserId, installed_at as installedAt
+    FROM slack_installations
+  `);
+  return stmt.all() as SlackInstallation[];
+}
+
+export function deleteSlackInstallation(teamId: string): void {
+  // Delete thread sessions for this team too
+  getDb().prepare('DELETE FROM slack_thread_sessions WHERE team_id = ?').run(teamId);
+  getDb().prepare('DELETE FROM slack_installations WHERE team_id = ?').run(teamId);
+}
+
+export function deleteSlackInstallationByUser(userId: string): void {
+  const installation = getSlackInstallationByUser(userId);
+  if (installation) {
+    deleteSlackInstallation(installation.teamId);
+  }
+}
+
+export function getSlackThreadSession(teamId: string, channelId: string, threadTs: string): SlackThreadSession | null {
+  const stmt = getDb().prepare(`
+    SELECT team_id as teamId, channel_id as channelId, thread_ts as threadTs,
+           session_key as sessionKey, created_at as createdAt
+    FROM slack_thread_sessions WHERE team_id = ? AND channel_id = ? AND thread_ts = ?
+  `);
+  return stmt.get(teamId, channelId, threadTs) as SlackThreadSession | null;
+}
+
+export function saveSlackThreadSession(session: {
+  teamId: string;
+  channelId: string;
+  threadTs: string;
+  sessionKey: string;
+}): void {
+  const stmt = getDb().prepare(`
+    INSERT OR REPLACE INTO slack_thread_sessions (team_id, channel_id, thread_ts, session_key, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  stmt.run(session.teamId, session.channelId, session.threadTs, session.sessionKey, Date.now());
 }
 
 /**
